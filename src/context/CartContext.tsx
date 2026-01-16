@@ -24,45 +24,46 @@ interface CartContextType {
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export function CartProvider({ children }: { children: ReactNode }) {
+  // 1. Começamos SEMPRE com array vazio para evitar erro na tela
   const [items, setItems] = useState<CartItem[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
 
-  // CARREGAMENTO SEGURO (ANTI-CRASH)
+  // 2. Só acessamos o LocalStorage depois que a página carregou (useEffect)
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("cart");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          // Sanitização: Garante que todo item tenha preço numérico
-          const safeItems = parsed.map((item: any) => ({
-            ...item,
-            price: Number(item.price) || 0,
-            quantity: Number(item.quantity) || 1,
-            finalPrice: Number(item.finalPrice) || 0,
-            name: item.name || "Produto sem nome"
-          }));
-          setItems(safeItems);
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("cart");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            // Sanitização: Garante que preço e qtd sejam números
+            const cleanItems = parsed.map((i: any) => ({
+                ...i,
+                price: Number(i.price) || 0,
+                quantity: Number(i.quantity) || 1,
+                finalPrice: (Number(i.price) || 0) * (Number(i.quantity) || 1)
+            }));
+            setItems(cleanItems);
+          }
         }
+      } catch (error) {
+        console.error("Erro ao recuperar carrinho, resetando.", error);
+        localStorage.removeItem("cart");
+      } finally {
+        setIsInitialized(true);
       }
-    } catch (error) {
-      console.error("Carrinho corrompido resetado.", error);
-      localStorage.removeItem("cart");
-    } finally {
-      setIsLoaded(true);
     }
   }, []);
 
+  // 3. Salva mudanças (apenas após inicializado)
   useEffect(() => {
-    if (isLoaded) {
+    if (isInitialized) {
       localStorage.setItem("cart", JSON.stringify(items));
     }
-  }, [items, isLoaded]);
+  }, [items, isInitialized]);
 
   const addToCart = (product: any, quantity: number) => {
     const price = Number(product.price) || 0;
-    const finalPrice = price * quantity;
-
     const newItem: CartItem = {
       cartId: Math.random().toString(36).substr(2, 9),
       id: product.id,
@@ -70,7 +71,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       price: price,
       quantity: quantity,
       imageUrl: product.imageUrl,
-      finalPrice: finalPrice,
+      finalPrice: price * quantity,
     };
     setItems((prev) => [...prev, newItem]);
   };
@@ -84,13 +85,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("cart");
   };
 
-  // Garante cálculos matemáticos seguros
-  const safeItems = Array.isArray(items) ? items : [];
-  const cartTotal = safeItems.reduce((acc, item) => acc + (Number(item.finalPrice) || 0), 0);
-  const cartCount = safeItems.reduce((acc, item) => acc + (Number(item.quantity) || 0), 0);
+  const cartTotal = items.reduce((acc, item) => acc + (item.finalPrice || 0), 0);
+  const cartCount = items.reduce((acc, item) => acc + (item.quantity || 0), 0);
 
   return (
-    <CartContext.Provider value={{ items: safeItems, addToCart, removeFromCart, clearCart, cartTotal, cartCount }}>
+    <CartContext.Provider value={{ items, addToCart, removeFromCart, clearCart, cartTotal, cartCount }}>
       {children}
     </CartContext.Provider>
   );
