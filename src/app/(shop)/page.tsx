@@ -7,20 +7,31 @@ import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { useCart } from "@/context/CartContext";
 import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X, CheckSquare, MessageSquare } from "lucide-react";
 
-// --- TIPOS ---
-interface Complement {
+// --- TIPOS (IGUAIS AO ADMIN) ---
+interface Option {
+  id: string;
   name: string;
-  price: number;
+  priceAdd: number;
+}
+
+interface ComplementGroup {
+  id: string;
+  title: string;
+  required: boolean;
+  maxSelection: number;
+  options: Option[];
 }
 
 interface Product {
   id: string;
   name: string;
   description: string;
-  price: number;
+  basePrice: number; // Admin salva como basePrice
+  price: number;     // Vamos usar esse pro front
   imageUrl?: string;
   category: string;
-  complements?: Complement[];
+  complementGroupIds?: string[]; // IDs salvos no produto
+  fullGroups?: ComplementGroup[]; // Grupos completos carregados
 }
 
 export default function ShopHome() {
@@ -32,70 +43,56 @@ export default function ShopHome() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [observation, setObservation] = useState("");
-  const [selectedComplements, setSelectedComplements] = useState<Complement[]>([]);
+  
+  // Seleção de Complementos: Mapa { "ID_DO_GRUPO": [Opções Selecionadas] }
+  const [selectedOptions, setSelectedOptions] = useState<Record<string, Option[]>>({});
 
-  // --- FUNÇÃO "DETECTIVE" DE PREÇO ---
-  const parsePrice = (data: any) => {
-    // 1. Tenta achar o preço em vários campos possíveis
-    let rawValue = data.price ?? data.preco ?? data.valor ?? data.value ?? 0;
-    
-    // 2. Se já for número, retorna direto
-    if (typeof rawValue === 'number') return rawValue;
-
-    // 3. Se for texto (ex: "R$ 10,90"), limpa tudo
-    if (typeof rawValue === 'string') {
-        // Remove "R$", espaços e pontos de milhar, troca vírgula por ponto
-        const clean = rawValue.replace(/[^\d,]/g, '').replace(',', '.');
-        return parseFloat(clean) || 0;
-    }
-
-    return 0;
-  };
-
-  // --- BUSCA PRODUTOS ---
+  // --- BUSCA DADOS ---
   useEffect(() => {
-    const fetchProducts = async () => {
+    const fetchData = async () => {
       try {
-        console.log("--- INICIANDO BUSCA DE PRODUTOS ---");
-        const productsRef = collection(db, "products");
-        const q = query(productsRef, orderBy("name"));
-        const snapshot = await getDocs(q);
+        console.log("--- CARREGANDO CARDÁPIO ---");
+        
+        // 1. Busca Produtos e Grupos em paralelo
+        const [productsSnap, groupsSnap] = await Promise.all([
+            getDocs(query(collection(db, "products"), orderBy("name"))),
+            getDocs(collection(db, "complement_groups")) // Nome padrão da coleção
+        ]);
 
-        const items = snapshot.docs.map((doc) => {
+        // 2. Mapeia Grupos para facilitar acesso
+        const groupsMap: Record<string, ComplementGroup> = {};
+        groupsSnap.docs.forEach(doc => {
+            groupsMap[doc.id] = { id: doc.id, ...doc.data() } as ComplementGroup;
+        });
+
+        // 3. Monta Produtos Cruzando Dados
+        const items = productsSnap.docs.map((doc) => {
           const data = doc.data();
           
-          // --- LOG DE DIAGNÓSTICO (Olhe no F12 do navegador) ---
-          console.log(`Produto: ${data.name}`, data); 
+          // Correção de Preço (Lê basePrice ou price)
+          const finalPrice = Number(data.basePrice) || Number(data.price) || 0;
 
-          // Tratamento robusto do preço
-          const finalPrice = parsePrice(data);
-
-          // Tratamento dos complementos
-          // Se não existir 'complements' no banco, cria array vazio
-          const rawComplements = data.complements || data.complementos || []; 
-          const safeComplements = Array.isArray(rawComplements) 
-            ? rawComplements.map((c: any) => ({
-                name: c.name || c.nome || "Item",
-                price: parsePrice(c) // Tenta ler o preço do complemento
-              }))
-            : [];
+          // Cruza os IDs com os Grupos Reais
+          const groupIds = data.complementGroupIds || [];
+          const loadedGroups = groupIds.map((id: string) => groupsMap[id]).filter(Boolean);
 
           return { 
               id: doc.id, 
               ...data, 
-              price: finalPrice,
-              complements: safeComplements
-          };
-        }) as Product[];
+              price: finalPrice, 
+              basePrice: finalPrice,
+              fullGroups: loadedGroups 
+          } as Product;
+        });
 
         setProducts(items);
       } catch (error) {
-        console.error("Erro fatal ao buscar produtos:", error);
+        console.error("Erro ao carregar:", error);
       } finally {
         setLoading(false);
       }
     };
-    fetchProducts();
+    fetchData();
   }, []);
 
   const groupedProducts = products.reduce((acc, product) => {
@@ -105,53 +102,85 @@ export default function ShopHome() {
     return acc;
   }, {} as Record<string, Product[]>);
 
-  // --- CONTROLES ---
+  // --- CONTROLES DO MODAL ---
   const openModal = (product: Product) => {
     setSelectedProduct(product);
     setQuantity(1);
     setObservation("");
-    setSelectedComplements([]);
+    setSelectedOptions({});
   };
 
-  const toggleComplement = (comp: Complement) => {
-    if (selectedComplements.find(c => c.name === comp.name)) {
-        setSelectedComplements(prev => prev.filter(c => c.name !== comp.name));
+  const toggleOption = (group: ComplementGroup, option: Option) => {
+    const currentSelected = selectedOptions[group.id] || [];
+    const isAlreadySelected = currentSelected.find(o => o.id === option.id);
+
+    let newSelection = [];
+
+    if (isAlreadySelected) {
+        // Remover
+        newSelection = currentSelected.filter(o => o.id !== option.id);
     } else {
-        setSelectedComplements(prev => [...prev, comp]);
+        // Adicionar (Verifica Máximo)
+        if (group.maxSelection === 1) {
+            // Se for apenas 1, troca direto (tipo Radio Button)
+            newSelection = [option];
+        } else {
+            // Se permitir vários, verifica limite
+            if (currentSelected.length >= group.maxSelection) {
+                alert(`Máximo de ${group.maxSelection} opções neste grupo.`);
+                return;
+            }
+            newSelection = [...currentSelected, option];
+        }
     }
+
+    setSelectedOptions({ ...selectedOptions, [group.id]: newSelection });
   };
 
   const calculateTotal = () => {
     if (!selectedProduct) return 0;
-    const compsTotal = selectedComplements.reduce((acc, curr) => acc + curr.price, 0);
-    return (selectedProduct.price + compsTotal) * quantity;
+    
+    // Soma preço base
+    let total = selectedProduct.price;
+
+    // Soma todas as opções selecionadas de todos os grupos
+    Object.values(selectedOptions).flat().forEach(opt => {
+        total += (opt.priceAdd || 0);
+    });
+
+    return total * quantity;
   };
 
   const handleAddToCart = () => {
-    if (selectedProduct) {
-      // Nome formatado para o carrinho: "X-Burger + Bacon [Obs: Sem cebola]"
-      let customName = selectedProduct.name;
-      
-      if (selectedComplements.length > 0) {
-          customName += ` + ${selectedComplements.map(c => c.name).join(', ')}`;
-      }
-      
-      if (observation.trim()) {
-          customName += ` [Obs: ${observation}]`;
-      }
+    if (!selectedProduct) return;
 
-      // Preço unitário final (Base + Complementos)
-      const finalUnitPrice = selectedProduct.price + selectedComplements.reduce((acc, c) => acc + c.price, 0);
-
-      const cartItem = {
-          ...selectedProduct,
-          name: customName,
-          price: finalUnitPrice,
-      };
-
-      addToCart(cartItem, quantity);
-      setSelectedProduct(null);
+    // Verifica Obrigatórios
+    const missingRequired = selectedProduct.fullGroups?.find(g => g.required && (!selectedOptions[g.id] || selectedOptions[g.id].length === 0));
+    if (missingRequired) {
+        alert(`O grupo "${missingRequired.title}" é obrigatório.`);
+        return;
     }
+
+    // Monta nome detalhado
+    let customName = selectedProduct.name;
+    const allSelectedOpts = Object.values(selectedOptions).flat();
+    
+    if (allSelectedOpts.length > 0) {
+        const optNames = allSelectedOpts.map(o => o.name).join(', ');
+        customName += ` (+ ${optNames})`;
+    }
+    
+    if (observation.trim()) customName += ` [Obs: ${observation}]`;
+
+    const unitPrice = calculateTotal() / quantity;
+
+    addToCart({
+        ...selectedProduct,
+        name: customName,
+        price: unitPrice,
+    }, quantity);
+
+    setSelectedProduct(null);
   };
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-pink-600" size={40}/></div>;
@@ -195,11 +224,8 @@ export default function ShopHome() {
                       <p className="text-xs text-gray-500 line-clamp-2 mt-1">{product.description}</p>
                     </div>
                     <div className="flex justify-between items-end">
-                      {/* Mostra preço formatado ou "Sob Consulta" se for 0 */}
                       <span className="font-bold text-green-600 text-sm">
-                        {product.price > 0 
-                            ? product.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) 
-                            : 'R$ 0,00'}
+                        {product.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                       </span>
                       <button className="bg-pink-50 text-pink-600 p-1.5 rounded-full hover:bg-pink-600 hover:text-white transition-colors">
                         <Plus size={16} />
@@ -213,7 +239,7 @@ export default function ShopHome() {
         ))
       )}
 
-      {/* --- MODAL --- */}
+      {/* --- MODAL DE DETALHES --- */}
       {selectedProduct && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4 animate-in fade-in duration-200 backdrop-blur-sm">
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
@@ -235,28 +261,37 @@ export default function ShopHome() {
                         <p className="text-sm text-gray-500 leading-relaxed">{selectedProduct.description}</p>
                     </div>
 
-                    {/* SEÇÃO DE COMPLEMENTOS (Só aparece se tiver dados no banco) */}
-                    {selectedProduct.complements && selectedProduct.complements.length > 0 ? (
-                        <div>
-                            <h3 className="font-bold text-gray-700 text-sm mb-3">Adicionais</h3>
-                            <div className="space-y-2">
-                                {selectedProduct.complements.map((comp, idx) => {
-                                    const isSelected = selectedComplements.some(c => c.name === comp.name);
-                                    return (
-                                        <div key={idx} onClick={() => toggleComplement(comp)} className={`flex justify-between items-center p-3 rounded-lg border cursor-pointer transition-all ${isSelected ? 'border-pink-500 bg-pink-50' : 'border-gray-200'}`}>
-                                            <div className="flex items-center gap-2">
-                                                <div className={`w-5 h-5 rounded border flex items-center justify-center ${isSelected ? 'bg-pink-500 border-pink-500 text-white' : 'border-gray-300'}`}>{isSelected && <CheckSquare size={14}/>}</div>
-                                                <span className="text-sm font-medium text-gray-700">{comp.name}</span>
-                                            </div>
-                                            <span className="text-sm font-bold text-green-600">+ {comp.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                                        </div>
-                                    );
-                                })}
-                            </div>
+                    {/* GRUPOS DE COMPLEMENTOS */}
+                    {selectedProduct.fullGroups && selectedProduct.fullGroups.length > 0 && (
+                        <div className="space-y-4">
+                            {selectedProduct.fullGroups.map(group => (
+                                <div key={group.id} className="bg-gray-50 p-3 rounded-lg border">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <h3 className="font-bold text-gray-700 text-sm">{group.title}</h3>
+                                        <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${group.required ? 'bg-red-100 text-red-600' : 'bg-gray-200 text-gray-500'}`}>
+                                            {group.required ? 'OBRIGATÓRIO' : 'OPCIONAL'}
+                                            {group.maxSelection > 1 && ` (Até ${group.maxSelection})`}
+                                        </span>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {group.options.map(opt => {
+                                            const isSelected = selectedOptions[group.id]?.some(o => o.id === opt.id);
+                                            return (
+                                                <div key={opt.id} onClick={() => toggleOption(group, opt)} className={`flex justify-between items-center p-2 rounded border cursor-pointer bg-white transition-all ${isSelected ? 'border-pink-500 ring-1 ring-pink-500' : 'border-gray-200 hover:border-pink-300'}`}>
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`w-4 h-4 rounded-sm border flex items-center justify-center ${isSelected ? 'bg-pink-600 border-pink-600 text-white' : 'border-gray-300'}`}>
+                                                            {isSelected && <CheckSquare size={12}/>}
+                                                        </div>
+                                                        <span className="text-sm text-gray-700">{opt.name}</span>
+                                                    </div>
+                                                    {opt.priceAdd > 0 && <span className="text-xs font-bold text-green-600">+ R$ {opt.priceAdd.toFixed(2)}</span>}
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            ))}
                         </div>
-                    ) : (
-                        // MENSAGEM DE DEBUG (Só pra você saber pq não apareceu)
-                        <p className="text-xs text-gray-300 italic text-center">Sem adicionais cadastrados para este item.</p>
                     )}
 
                     <div>
