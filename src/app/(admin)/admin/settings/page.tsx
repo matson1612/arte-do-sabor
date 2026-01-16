@@ -119,62 +119,60 @@ export default function CartPage() {
 
   }, [userLocation, selectedRegionId, settings, deliveryMethod]);
 
-  // --- BUSCA CEP E ATUALIZA MAPA (VERSÃO CORRIGIDA) ---
+  // --- BUSCA CEP: ESTRATÉGIA "CEP PURO" ---
   const handleBuscaCep = async () => {
+    // Remove qualquer caractere que não seja número
     const cep = cepInput.replace(/\D/g, '');
-    if (cep.length !== 8) return alert("CEP inválido.");
+    
+    if (cep.length !== 8) return alert("CEP inválido (digite 8 números).");
     setCepLoading(true);
 
     try {
-        // 1. Busca os dados de texto no ViaCEP
+        // 1. Busca os dados de texto no ViaCEP (Para preencher os campos visuais)
         const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
         const data = await res.json();
-        if (data.erro) { alert("CEP não encontrado."); setCepLoading(false); return; }
+        
+        if (data.erro) { 
+            alert("CEP não encontrado."); 
+            setCepLoading(false); 
+            return; 
+        }
 
-        // Atualiza os campos de texto
+        // Preenche os inputs de texto para o cliente ver
         setAddress(prev => ({ 
             ...prev, 
             street: data.logradouro, 
             district: data.bairro, 
             city: data.localidade, 
-            number: "" 
+            number: "" // Limpa o número para forçar o cliente a digitar
         }));
 
-        // 2. Geocoding TURBINADO para o Google Maps
+        // 2. Google Maps: Busca EXCLUSIVA pelo CEP
         if (window.google && window.google.maps) {
             const geocoder = new window.google.maps.Geocoder();
             
-            // TRUQUE: Mandar o CEP e o Bairro explicitamente ajuda o Google a não se perder
-            // Ex: "77064-000, Taquaralto, Palmas, TO, Brasil"
-            const searchString = `${cep}, ${data.bairro}, ${data.localidade}, ${data.uf}, Brasil`;
-            
-            geocoder.geocode({ 
-                address: searchString,
-                componentRestrictions: { country: 'BR' } // Restringe ao Brasil para evitar erros
-            }, (results, status) => {
+            // Manda SÓ O CEP. Isso evita que o Google confunda "Alameda X" com "Rua Y"
+            geocoder.geocode({ address: cep }, (results, status) => {
                 if (status === 'OK' && results && results[0]) {
                     const loc = results[0].geometry.location;
                     const newPos = { lat: loc.lat(), lng: loc.lng() };
                     
+                    // Atualiza a posição do pino e centraliza o mapa
                     setUserLocation(newPos);
                     mapRef.current?.panTo(newPos);
-                    mapRef.current?.setZoom(17); // Zoom bem próximo para a pessoa conferir
+                    mapRef.current?.setZoom(17); // Zoom bem perto para facilitar o ajuste manual
                 } else {
-                    console.warn("Google não achou o local exato, tentando apenas pelo nome da rua...");
-                    // Se falhar pelo CEP, tenta uma busca mais genérica
-                    geocoder.geocode({ address: `${data.logradouro}, ${data.localidade}, Brasil` }, (res2, stat2) => {
-                        if (stat2 === 'OK' && res2 && res2[0]) {
-                            const loc2 = res2[0].geometry.location;
-                            setUserLocation({ lat: loc2.lat(), lng: loc2.lng() });
-                            mapRef.current?.panTo(loc2);
-                        }
-                    });
+                    console.warn("O Google não encontrou coordenadas para este CEP específico.");
                 }
             });
         }
+        
+        // Joga o foco no campo de número
         document.getElementById("num-input")?.focus();
+
     } catch (e) { 
-        alert("Erro ao buscar."); 
+        console.error(e);
+        alert("Erro ao buscar CEP. Verifique a conexão."); 
     } finally { 
         setCepLoading(false); 
     }

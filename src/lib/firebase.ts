@@ -1,6 +1,6 @@
 // src/lib/firebase.ts
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore, initializeFirestore } from "firebase/firestore"; // Importe initializeFirestore
+import { initializeFirestore } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
 const firebaseConfig = {
@@ -16,14 +16,16 @@ const firebaseConfig = {
 // Inicializa o App
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// --- CORREÇÃO DE TRAVAMENTO AQUI ---
-// Usamos initializeFirestore para forçar Long Polling se necessário
+// Configuração do Firestore (mantive sua config de LongPolling para evitar travamentos)
 const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true, // Força HTTP se WebSockets estiverem travando
+  experimentalForceLongPolling: true,
 });
 
 // Auth
 const auth = getAuth(app);
-const googleProvider = new GoogleAuthProvider();
 
-export { db, auth, googleProvider };
+// AQUI ESTAVA A DIFERENÇA: Mudamos de 'googleProvider' para 'provider'
+const provider = new GoogleAuthProvider();
+
+// Agora exportamos como 'provider' para o AuthContext encontrar
+export { db, auth, provider };

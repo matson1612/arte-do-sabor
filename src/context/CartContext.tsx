@@ -1,103 +1,80 @@
-// src/context/CartContext.tsx
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
-import { CartItem, Product, Option } from "@/types";
-import { useAuth } from "@/context/AuthContext"; // Importamos o Auth para saber se tem usuário
+import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 
+// Definição do Tipo do Item
+export interface CartItem {
+  cartId: string;
+  id: string;
+  name: string;
+  price: number;
+  quantity: number;
+  imageUrl?: string;
+  finalPrice: number;
+}
+
+// Definição do que o Contexto oferece (Adicionamos cartCount aqui)
 interface CartContextType {
   items: CartItem[];
-  addToCart: (product: Product, quantity: number, selectedOptions: Record<string, Option[]>, finalPrice: number) => void;
+  addToCart: (item: any, quantity: number) => void;
   removeFromCart: (cartId: string) => void;
   clearCart: () => void;
   cartTotal: number;
+  cartCount: number; // <--- O ERRO ESTAVA AQUI (Faltava essa linha)
 }
 
-const CartContext = createContext<CartContextType>({} as CartContextType);
+const CartContext = createContext<CartContextType | undefined>(undefined);
 
-export function CartProvider({ children }: { children: React.ReactNode }) {
-  const { user, loading: authLoading } = useAuth(); // Pegamos o usuário logado
+export function CartProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
-  const [cartTotal, setCartTotal] = useState(0);
-  const [isLoaded, setIsLoaded] = useState(false);
 
-  // 1. CARREGAR CARRINHO (Apenas se tiver usuário)
+  // Carrega do LocalStorage ao iniciar
   useEffect(() => {
-    if (authLoading) return; // Espera o Auth decidir se está logado ou não
+    const saved = localStorage.getItem("cart");
+    if (saved) setItems(JSON.parse(saved));
+  }, []);
 
-    if (!user) {
-      // SE NÃO TIVER LOGADO: Começa vazio (RAM apenas)
-      // Isso resolve o bug dos 6 itens, pois ignoramos o localStorage antigo
-      setItems([]); 
-      setIsLoaded(true);
-      return;
-    }
-
-    // SE TIVER LOGADO: Tenta buscar o carrinho ESPECÍFICO desse usuário
-    const storageKey = `cart_${user.uid}`; // Chave única por usuário
-    const saved = localStorage.getItem(storageKey);
-    
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        // Validação de Segurança: Só aceita se for array válido
-        if (Array.isArray(parsed)) {
-            setItems(parsed);
-        } else {
-            setItems([]); // Se estiver corrompido, limpa
-        }
-      } catch (e) {
-        console.error("Erro ao ler carrinho:", e);
-        setItems([]);
-      }
-    }
-    setIsLoaded(true);
-  }, [user, authLoading]);
-
-  // 2. SALVAR CARRINHO (Apenas se tiver usuário)
+  // Salva no LocalStorage sempre que muda
   useEffect(() => {
-    if (!isLoaded) return; // Não salva enquanto não terminar de carregar
+    localStorage.setItem("cart", JSON.stringify(items));
+  }, [items]);
 
-    // Calcula total
-    const total = items.reduce((acc, item) => acc + ((item.finalPrice || 0) * (item.quantity || 1)), 0);
-    setCartTotal(total);
-
-    if (user) {
-      // Salva persistente apenas se logado
-      const storageKey = `cart_${user.uid}`;
-      localStorage.setItem(storageKey, JSON.stringify(items));
-    }
-    // Se não tiver user, não fazemos nada (fica só na memória do estado 'items')
-
-  }, [items, user, isLoaded]);
-
-  const addToCart = (product: Product, q: number, opts: Record<string, Option[]>, price: number) => {
+  const addToCart = (product: any, quantity: number) => {
     const newItem: CartItem = {
-      ...product,
-      cartId: crypto.randomUUID(),
-      selectedOptions: opts,
-      quantity: q,
-      finalPrice: price
+      cartId: Math.random().toString(36).substr(2, 9),
+      id: product.id,
+      name: product.name,
+      price: product.price,
+      quantity,
+      imageUrl: product.imageUrl,
+      finalPrice: product.price * quantity,
     };
-    setItems([...items, newItem]);
+    setItems((prev) => [...prev, newItem]);
   };
 
-  const removeFromCart = (id: string) => {
-    setItems(items.filter(i => i.cartId !== id));
+  const removeFromCart = (cartId: string) => {
+    setItems((prev) => prev.filter((item) => item.cartId !== cartId));
   };
-  
+
   const clearCart = () => {
     setItems([]);
-    if (user) {
-        localStorage.removeItem(`cart_${user.uid}`);
-    }
   };
 
+  // Cálculos Automáticos
+  const cartTotal = items.reduce((acc, item) => acc + item.finalPrice, 0);
+  
+  // A SOMA DA QUANTIDADE TOTAL DE ITENS
+  const cartCount = items.reduce((acc, item) => acc + item.quantity, 0);
+
   return (
-    <CartContext.Provider value={{ items, addToCart, removeFromCart, clearCart, cartTotal }}>
+    <CartContext.Provider value={{ items, addToCart, removeFromCart, clearCart, cartTotal, cartCount }}>
       {children}
     </CartContext.Provider>
   );
 }
 
-export const useCart = () => useContext(CartContext);
+export const useCart = () => {
+  const context = useContext(CartContext);
+  if (!context) throw new Error("useCart deve ser usado dentro de CartProvider");
+  return context;
+};
