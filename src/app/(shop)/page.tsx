@@ -20,7 +20,7 @@ interface Product {
   price: number;
   imageUrl?: string;
   category: string;
-  complements?: Complement[]; // Lista de opcionais (Ex: Bacon, Queijo)
+  complements?: Complement[];
 }
 
 export default function ShopHome() {
@@ -28,57 +28,69 @@ export default function ShopHome() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Estado para o Modal de Produto
+  // Estado do Modal
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [observation, setObservation] = useState("");
   const [selectedComplements, setSelectedComplements] = useState<Complement[]>([]);
 
-  // --- FUNÇÃO PARA LIMPAR PREÇO ---
-  const parsePrice = (value: any) => {
-    if (!value) return 0;
-    if (typeof value === 'number') return value;
+  // --- FUNÇÃO "DETECTIVE" DE PREÇO ---
+  const parsePrice = (data: any) => {
+    // 1. Tenta achar o preço em vários campos possíveis
+    let rawValue = data.price ?? data.preco ?? data.valor ?? data.value ?? 0;
     
-    // Se for texto (ex: "R$ 10,90"), limpa tudo
-    const stringValue = String(value);
-    const clean = stringValue.replace(/[^\d.,]/g, ''); 
-    const dotPrice = clean.replace(',', '.');
-    
-    return parseFloat(dotPrice) || 0;
+    // 2. Se já for número, retorna direto
+    if (typeof rawValue === 'number') return rawValue;
+
+    // 3. Se for texto (ex: "R$ 10,90"), limpa tudo
+    if (typeof rawValue === 'string') {
+        // Remove "R$", espaços e pontos de milhar, troca vírgula por ponto
+        const clean = rawValue.replace(/[^\d,]/g, '').replace(',', '.');
+        return parseFloat(clean) || 0;
+    }
+
+    return 0;
   };
 
   // --- BUSCA PRODUTOS ---
   useEffect(() => {
     const fetchProducts = async () => {
       try {
+        console.log("--- INICIANDO BUSCA DE PRODUTOS ---");
         const productsRef = collection(db, "products");
         const q = query(productsRef, orderBy("name"));
-        
-        // --- CORREÇÃO AQUI: Usamos getDocs (plural) ---
         const snapshot = await getDocs(q);
 
         const items = snapshot.docs.map((doc) => {
           const data = doc.data();
           
-          const safePrice = parsePrice(data.price);
-          
-          // Trata os complementos com segurança
-          const safeComplements = (data.complements || []).map((c: any) => ({
-              name: c.name,
-              price: parsePrice(c.price)
-          }));
+          // --- LOG DE DIAGNÓSTICO (Olhe no F12 do navegador) ---
+          console.log(`Produto: ${data.name}`, data); 
+
+          // Tratamento robusto do preço
+          const finalPrice = parsePrice(data);
+
+          // Tratamento dos complementos
+          // Se não existir 'complements' no banco, cria array vazio
+          const rawComplements = data.complements || data.complementos || []; 
+          const safeComplements = Array.isArray(rawComplements) 
+            ? rawComplements.map((c: any) => ({
+                name: c.name || c.nome || "Item",
+                price: parsePrice(c) // Tenta ler o preço do complemento
+              }))
+            : [];
 
           return { 
               id: doc.id, 
               ...data, 
-              price: safePrice,
+              price: finalPrice,
               complements: safeComplements
           };
         }) as Product[];
 
         setProducts(items);
       } catch (error) {
-        console.error("Erro produtos:", error);
+        console.error("Erro fatal ao buscar produtos:", error);
       } finally {
         setLoading(false);
       }
@@ -93,7 +105,7 @@ export default function ShopHome() {
     return acc;
   }, {} as Record<string, Product[]>);
 
-  // --- CONTROLES DO MODAL ---
+  // --- CONTROLES ---
   const openModal = (product: Product) => {
     setSelectedProduct(product);
     setQuantity(1);
@@ -103,40 +115,38 @@ export default function ShopHome() {
 
   const toggleComplement = (comp: Complement) => {
     if (selectedComplements.find(c => c.name === comp.name)) {
-        // Remove
         setSelectedComplements(prev => prev.filter(c => c.name !== comp.name));
     } else {
-        // Adiciona
         setSelectedComplements(prev => [...prev, comp]);
     }
   };
 
-  const calculateUnitPrice = () => {
+  const calculateTotal = () => {
     if (!selectedProduct) return 0;
-    const complementsTotal = selectedComplements.reduce((acc, curr) => acc + curr.price, 0);
-    return selectedProduct.price + complementsTotal;
+    const compsTotal = selectedComplements.reduce((acc, curr) => acc + curr.price, 0);
+    return (selectedProduct.price + compsTotal) * quantity;
   };
 
   const handleAddToCart = () => {
     if (selectedProduct) {
-      const unitPrice = calculateUnitPrice();
-      
-      // Monta nome personalizado
+      // Nome formatado para o carrinho: "X-Burger + Bacon [Obs: Sem cebola]"
       let customName = selectedProduct.name;
       
       if (selectedComplements.length > 0) {
-          const compNames = selectedComplements.map(c => c.name).join(', ');
-          customName += ` (+ ${compNames})`;
+          customName += ` + ${selectedComplements.map(c => c.name).join(', ')}`;
       }
       
       if (observation.trim()) {
           customName += ` [Obs: ${observation}]`;
       }
 
+      // Preço unitário final (Base + Complementos)
+      const finalUnitPrice = selectedProduct.price + selectedComplements.reduce((acc, c) => acc + c.price, 0);
+
       const cartItem = {
           ...selectedProduct,
           name: customName,
-          price: unitPrice, 
+          price: finalUnitPrice,
       };
 
       addToCart(cartItem, quantity);
@@ -185,8 +195,11 @@ export default function ShopHome() {
                       <p className="text-xs text-gray-500 line-clamp-2 mt-1">{product.description}</p>
                     </div>
                     <div className="flex justify-between items-end">
+                      {/* Mostra preço formatado ou "Sob Consulta" se for 0 */}
                       <span className="font-bold text-green-600 text-sm">
-                        {product.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        {product.price > 0 
+                            ? product.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) 
+                            : 'R$ 0,00'}
                       </span>
                       <button className="bg-pink-50 text-pink-600 p-1.5 rounded-full hover:bg-pink-600 hover:text-white transition-colors">
                         <Plus size={16} />
@@ -200,28 +213,18 @@ export default function ShopHome() {
         ))
       )}
 
-      {/* --- MODAL DE DETALHES --- */}
+      {/* --- MODAL --- */}
       {selectedProduct && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4 animate-in fade-in duration-200 backdrop-blur-sm">
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
-
             <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-10 z-10 max-h-[90vh] overflow-y-auto">
+                <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-black/20 text-white p-1 rounded-full hover:bg-black/40"><X size={20}/></button>
                 
-                <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-black/20 text-white p-1 rounded-full hover:bg-black/40 backdrop-blur-md">
-                    <X size={20}/>
-                </button>
-
-                {/* Imagem */}
                 <div className="h-48 bg-gray-100 relative">
-                    {selectedProduct.imageUrl ? (
-                         <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" />
-                    ) : (
-                        <div className="w-full h-full flex items-center justify-center text-gray-400"><ImageOff size={40}/></div>
-                    )}
+                    {selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-400"><ImageOff size={40}/></div>}
                 </div>
 
                 <div className="p-6 space-y-6">
-                    {/* Cabeçalho */}
                     <div>
                         <div className="flex justify-between items-start mb-1">
                             <h2 className="text-xl font-bold text-gray-800">{selectedProduct.name}</h2>
@@ -232,8 +235,8 @@ export default function ShopHome() {
                         <p className="text-sm text-gray-500 leading-relaxed">{selectedProduct.description}</p>
                     </div>
 
-                    {/* Adicionais / Complementos */}
-                    {selectedProduct.complements && selectedProduct.complements.length > 0 && (
+                    {/* SEÇÃO DE COMPLEMENTOS (Só aparece se tiver dados no banco) */}
+                    {selectedProduct.complements && selectedProduct.complements.length > 0 ? (
                         <div>
                             <h3 className="font-bold text-gray-700 text-sm mb-3">Adicionais</h3>
                             <div className="space-y-2">
@@ -242,54 +245,37 @@ export default function ShopHome() {
                                     return (
                                         <div key={idx} onClick={() => toggleComplement(comp)} className={`flex justify-between items-center p-3 rounded-lg border cursor-pointer transition-all ${isSelected ? 'border-pink-500 bg-pink-50' : 'border-gray-200'}`}>
                                             <div className="flex items-center gap-2">
-                                                <div className={`w-5 h-5 rounded border flex items-center justify-center ${isSelected ? 'bg-pink-500 border-pink-500 text-white' : 'border-gray-300'}`}>
-                                                    {isSelected && <CheckSquare size={14}/>}
-                                                </div>
+                                                <div className={`w-5 h-5 rounded border flex items-center justify-center ${isSelected ? 'bg-pink-500 border-pink-500 text-white' : 'border-gray-300'}`}>{isSelected && <CheckSquare size={14}/>}</div>
                                                 <span className="text-sm font-medium text-gray-700">{comp.name}</span>
                                             </div>
-                                            <span className="text-sm font-bold text-green-600">+ R$ {comp.price.toFixed(2)}</span>
+                                            <span className="text-sm font-bold text-green-600">+ {comp.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                                         </div>
                                     );
                                 })}
                             </div>
                         </div>
+                    ) : (
+                        // MENSAGEM DE DEBUG (Só pra você saber pq não apareceu)
+                        <p className="text-xs text-gray-300 italic text-center">Sem adicionais cadastrados para este item.</p>
                     )}
 
-                    {/* Observação */}
                     <div>
-                        <label className="font-bold text-gray-700 text-sm mb-2 flex items-center gap-2">
-                            <MessageSquare size={16}/> Alguma observação?
-                        </label>
-                        <textarea 
-                            className="w-full p-3 border rounded-lg bg-gray-50 focus:bg-white text-sm" 
-                            rows={3}
-                            placeholder="Ex: Tirar a cebola, caprichar no molho..."
-                            value={observation}
-                            onChange={e => setObservation(e.target.value)}
-                        />
+                        <label className="font-bold text-gray-700 text-sm mb-2 flex items-center gap-2"><MessageSquare size={16}/> Observação</label>
+                        <textarea className="w-full p-3 border rounded-lg bg-gray-50 focus:bg-white text-sm" rows={2} placeholder="Ex: Sem cebola..." value={observation} onChange={e => setObservation(e.target.value)}/>
                     </div>
 
-                    {/* Botões de Ação */}
-                    <div className="pt-2">
-                        <div className="flex items-center gap-4">
-                            {/* Quantidade */}
-                            <div className="flex items-center border rounded-xl overflow-hidden bg-gray-50 h-12">
-                                <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="px-4 h-full hover:bg-gray-200 text-gray-600"><Minus size={18}/></button>
-                                <span className="w-8 text-center font-bold text-lg">{quantity}</span>
-                                <button onClick={() => setQuantity(q => q + 1)} className="px-4 h-full hover:bg-gray-200 text-pink-600"><Plus size={18}/></button>
-                            </div>
-                            
-                            {/* Botão Adicionar */}
-                            <button 
-                                onClick={handleAddToCart} 
-                                className="flex-1 bg-pink-600 text-white font-bold h-12 rounded-xl hover:bg-pink-700 active:scale-95 transition-all flex justify-center items-center gap-2 shadow-lg shadow-pink-200"
-                            >
-                                <span>Adicionar</span>
-                                <span className="bg-pink-700/50 px-2 py-0.5 rounded text-xs">
-                                    {(calculateUnitPrice() * quantity).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                </span>
-                            </button>
+                    <div className="flex items-center gap-4 pt-2">
+                        <div className="flex items-center border rounded-xl overflow-hidden bg-gray-50 h-12">
+                            <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="px-4 h-full hover:bg-gray-200 text-gray-600"><Minus size={18}/></button>
+                            <span className="w-8 text-center font-bold text-lg">{quantity}</span>
+                            <button onClick={() => setQuantity(q => q + 1)} className="px-4 h-full hover:bg-gray-200 text-pink-600"><Plus size={18}/></button>
                         </div>
+                        <button onClick={handleAddToCart} className="flex-1 bg-pink-600 text-white font-bold h-12 rounded-xl hover:bg-pink-700 flex justify-center items-center gap-2 shadow-lg">
+                            <span>Adicionar</span>
+                            <span className="bg-pink-700/50 px-2 py-0.5 rounded text-xs">
+                                {calculateTotal().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </span>
+                        </button>
                     </div>
                 </div>
             </div>
