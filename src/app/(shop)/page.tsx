@@ -5,7 +5,13 @@ import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { useCart } from "@/context/CartContext";
-import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X } from "lucide-react";
+import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X, CheckSquare, MessageSquare } from "lucide-react";
+
+// --- TIPOS ---
+interface Complement {
+  name: string;
+  price: number;
+}
 
 interface Product {
   id: string;
@@ -14,6 +20,7 @@ interface Product {
   price: number;
   imageUrl?: string;
   category: string;
+  complements?: Complement[]; // Lista de opcionais (Ex: Bacon, Queijo)
 }
 
 export default function ShopHome() {
@@ -21,32 +28,52 @@ export default function ShopHome() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   
+  // Estado para o Modal de Produto
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [quantity, setQuantity] = useState(1);
+  const [observation, setObservation] = useState("");
+  const [selectedComplements, setSelectedComplements] = useState<Complement[]>([]);
 
+  // --- FUNÇÃO PARA LIMPAR PREÇO ---
+  const parsePrice = (value: any) => {
+    if (!value) return 0;
+    if (typeof value === 'number') return value;
+    
+    // Se for texto (ex: "R$ 10,90"), limpa tudo
+    const stringValue = String(value);
+    const clean = stringValue.replace(/[^\d.,]/g, ''); 
+    const dotPrice = clean.replace(',', '.');
+    
+    return parseFloat(dotPrice) || 0;
+  };
+
+  // --- BUSCA PRODUTOS ---
   useEffect(() => {
     const fetchProducts = async () => {
       try {
         const productsRef = collection(db, "products");
         const q = query(productsRef, orderBy("name"));
+        
+        // --- CORREÇÃO AQUI: Usamos getDocs (plural) ---
         const snapshot = await getDocs(q);
 
         const items = snapshot.docs.map((doc) => {
           const data = doc.data();
           
-          // --- CORREÇÃO ROBUSTA DE PREÇO ---
-          let price = data.price;
+          const safePrice = parsePrice(data.price);
           
-          // 1. Se for string, tenta limpar R$, espaços e trocar vírgula por ponto
-          if (typeof price === 'string') {
-             price = price.replace('R$', '').trim().replace(',', '.');
-             price = parseFloat(price);
-          }
-          
-          // 2. Se for número direto ou virou número, ok. Se não, vira 0.
-          if (!price || isNaN(price)) price = 0;
+          // Trata os complementos com segurança
+          const safeComplements = (data.complements || []).map((c: any) => ({
+              name: c.name,
+              price: parsePrice(c.price)
+          }));
 
-          return { id: doc.id, ...data, price };
+          return { 
+              id: doc.id, 
+              ...data, 
+              price: safePrice,
+              complements: safeComplements
+          };
         }) as Product[];
 
         setProducts(items);
@@ -66,16 +93,54 @@ export default function ShopHome() {
     return acc;
   }, {} as Record<string, Product[]>);
 
+  // --- CONTROLES DO MODAL ---
   const openModal = (product: Product) => {
     setSelectedProduct(product);
     setQuantity(1);
+    setObservation("");
+    setSelectedComplements([]);
+  };
+
+  const toggleComplement = (comp: Complement) => {
+    if (selectedComplements.find(c => c.name === comp.name)) {
+        // Remove
+        setSelectedComplements(prev => prev.filter(c => c.name !== comp.name));
+    } else {
+        // Adiciona
+        setSelectedComplements(prev => [...prev, comp]);
+    }
+  };
+
+  const calculateUnitPrice = () => {
+    if (!selectedProduct) return 0;
+    const complementsTotal = selectedComplements.reduce((acc, curr) => acc + curr.price, 0);
+    return selectedProduct.price + complementsTotal;
   };
 
   const handleAddToCart = () => {
     if (selectedProduct) {
-      addToCart(selectedProduct, quantity);
+      const unitPrice = calculateUnitPrice();
+      
+      // Monta nome personalizado
+      let customName = selectedProduct.name;
+      
+      if (selectedComplements.length > 0) {
+          const compNames = selectedComplements.map(c => c.name).join(', ');
+          customName += ` (+ ${compNames})`;
+      }
+      
+      if (observation.trim()) {
+          customName += ` [Obs: ${observation}]`;
+      }
+
+      const cartItem = {
+          ...selectedProduct,
+          name: customName,
+          price: unitPrice, 
+      };
+
+      addToCart(cartItem, quantity);
       setSelectedProduct(null);
-      setQuantity(1);
     }
   };
 
@@ -83,6 +148,7 @@ export default function ShopHome() {
 
   return (
     <div className="space-y-8 pb-24">
+      {/* Banner */}
       <div className="bg-gradient-to-r from-pink-600 to-rose-500 rounded-2xl p-6 text-white shadow-lg">
         <h2 className="text-2xl font-bold mb-1">Cardápio 🍔</h2>
         <p className="opacity-90 text-sm">Escolha suas delícias abaixo.</p>
@@ -101,7 +167,11 @@ export default function ShopHome() {
             </h3>
             <div className="grid gap-4 md:grid-cols-2">
               {items.map((product) => (
-                <div key={product.id} onClick={() => openModal(product)} className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex gap-3 cursor-pointer hover:border-pink-300 transition-colors group">
+                <div 
+                    key={product.id} 
+                    onClick={() => openModal(product)} 
+                    className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex gap-3 cursor-pointer hover:border-pink-300 transition-colors group"
+                >
                   <div className="w-24 h-24 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 relative">
                     {product.imageUrl ? (
                       <img src={product.imageUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
@@ -130,30 +200,96 @@ export default function ShopHome() {
         ))
       )}
 
+      {/* --- MODAL DE DETALHES --- */}
       {selectedProduct && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4 animate-in fade-in duration-200 backdrop-blur-sm">
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
-            <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-10 z-10">
-                <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-black/20 text-white p-1 rounded-full hover:bg-black/40 backdrop-blur-md"><X size={20}/></button>
-                <div className="h-56 bg-gray-100 relative">
-                    {selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-400"><ImageOff size={40}/></div>}
+
+            <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-10 z-10 max-h-[90vh] overflow-y-auto">
+                
+                <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-black/20 text-white p-1 rounded-full hover:bg-black/40 backdrop-blur-md">
+                    <X size={20}/>
+                </button>
+
+                {/* Imagem */}
+                <div className="h-48 bg-gray-100 relative">
+                    {selectedProduct.imageUrl ? (
+                         <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" />
+                    ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-400"><ImageOff size={40}/></div>
+                    )}
                 </div>
-                <div className="p-6">
-                    <div className="flex justify-between items-start mb-2">
-                        <h2 className="text-xl font-bold text-gray-800">{selectedProduct.name}</h2>
-                        <div className="text-xl font-bold text-green-600">{selectedProduct.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
-                    </div>
-                    <p className="text-sm text-gray-500 mb-6 leading-relaxed">{selectedProduct.description || "Sem descrição adicional."}</p>
-                    <div className="flex items-center gap-4">
-                        <div className="flex items-center border rounded-xl overflow-hidden bg-gray-50">
-                            <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="p-3.5 hover:bg-gray-200 text-gray-600 active:bg-gray-300"><Minus size={18}/></button>
-                            <span className="w-8 text-center font-bold text-lg">{quantity}</span>
-                            <button onClick={() => setQuantity(q => q + 1)} className="p-3.5 hover:bg-gray-200 text-pink-600 active:bg-gray-300"><Plus size={18}/></button>
+
+                <div className="p-6 space-y-6">
+                    {/* Cabeçalho */}
+                    <div>
+                        <div className="flex justify-between items-start mb-1">
+                            <h2 className="text-xl font-bold text-gray-800">{selectedProduct.name}</h2>
+                            <div className="text-xl font-bold text-green-600">
+                                {selectedProduct.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </div>
                         </div>
-                        <button onClick={handleAddToCart} className="flex-1 bg-pink-600 text-white font-bold py-3.5 rounded-xl hover:bg-pink-700 active:scale-95 transition-all flex justify-center items-center gap-2 shadow-lg shadow-pink-200">
-                            <span>Adicionar</span>
-                            <span className="bg-pink-700/50 px-2 py-0.5 rounded text-xs">{(selectedProduct.price * quantity).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                        </button>
+                        <p className="text-sm text-gray-500 leading-relaxed">{selectedProduct.description}</p>
+                    </div>
+
+                    {/* Adicionais / Complementos */}
+                    {selectedProduct.complements && selectedProduct.complements.length > 0 && (
+                        <div>
+                            <h3 className="font-bold text-gray-700 text-sm mb-3">Adicionais</h3>
+                            <div className="space-y-2">
+                                {selectedProduct.complements.map((comp, idx) => {
+                                    const isSelected = selectedComplements.some(c => c.name === comp.name);
+                                    return (
+                                        <div key={idx} onClick={() => toggleComplement(comp)} className={`flex justify-between items-center p-3 rounded-lg border cursor-pointer transition-all ${isSelected ? 'border-pink-500 bg-pink-50' : 'border-gray-200'}`}>
+                                            <div className="flex items-center gap-2">
+                                                <div className={`w-5 h-5 rounded border flex items-center justify-center ${isSelected ? 'bg-pink-500 border-pink-500 text-white' : 'border-gray-300'}`}>
+                                                    {isSelected && <CheckSquare size={14}/>}
+                                                </div>
+                                                <span className="text-sm font-medium text-gray-700">{comp.name}</span>
+                                            </div>
+                                            <span className="text-sm font-bold text-green-600">+ R$ {comp.price.toFixed(2)}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Observação */}
+                    <div>
+                        <label className="font-bold text-gray-700 text-sm mb-2 flex items-center gap-2">
+                            <MessageSquare size={16}/> Alguma observação?
+                        </label>
+                        <textarea 
+                            className="w-full p-3 border rounded-lg bg-gray-50 focus:bg-white text-sm" 
+                            rows={3}
+                            placeholder="Ex: Tirar a cebola, caprichar no molho..."
+                            value={observation}
+                            onChange={e => setObservation(e.target.value)}
+                        />
+                    </div>
+
+                    {/* Botões de Ação */}
+                    <div className="pt-2">
+                        <div className="flex items-center gap-4">
+                            {/* Quantidade */}
+                            <div className="flex items-center border rounded-xl overflow-hidden bg-gray-50 h-12">
+                                <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="px-4 h-full hover:bg-gray-200 text-gray-600"><Minus size={18}/></button>
+                                <span className="w-8 text-center font-bold text-lg">{quantity}</span>
+                                <button onClick={() => setQuantity(q => q + 1)} className="px-4 h-full hover:bg-gray-200 text-pink-600"><Plus size={18}/></button>
+                            </div>
+                            
+                            {/* Botão Adicionar */}
+                            <button 
+                                onClick={handleAddToCart} 
+                                className="flex-1 bg-pink-600 text-white font-bold h-12 rounded-xl hover:bg-pink-700 active:scale-95 transition-all flex justify-center items-center gap-2 shadow-lg shadow-pink-200"
+                            >
+                                <span>Adicionar</span>
+                                <span className="bg-pink-700/50 px-2 py-0.5 rounded text-xs">
+                                    {(calculateUnitPrice() * quantity).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                </span>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
