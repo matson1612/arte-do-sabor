@@ -36,7 +36,7 @@ export default function SettingsPage() {
   // Carrega a API do Google Maps
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
-    googleMapsApiKey: "SAIzaSyBy365txh8nJ9JuGfvyPGdW5-angEXWBj8" // <--- COLOQUE SUA CHAVE AQUI ⚠️
+    googleMapsApiKey: "AIzaSyBy365txh8nJ9JuGfvyPGdW5-angEXWBj8" // <--- COLOQUE SUA CHAVE AQUI ⚠️
   });
 
   // Busca dados salvos
