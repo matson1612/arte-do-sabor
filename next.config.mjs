@@ -1,15 +1,11 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  /* config options here */
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   typescript: {
-    // !! ATENÇÃO !!
-    // Perigosamente permite o build mesmo com erros de tipagem.
-    // Usamos isso para testar rápido em produção.
+    // Ignora erros de tipagem para publicar rápido
     ignoreBuildErrors: true,
   },
   eslint: {
-    // Ignora avisos de estilo durante o build
+    // Ignora regras de estilo para não travar o build
     ignoreDuringBuilds: true,
   },
 };
