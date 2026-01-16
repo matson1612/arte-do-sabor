@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 
-// Definição do Tipo do Item
 export interface CartItem {
   cartId: string;
   id: string;
@@ -13,31 +12,52 @@ export interface CartItem {
   finalPrice: number;
 }
 
-// Definição do que o Contexto oferece (Adicionamos cartCount aqui)
 interface CartContextType {
   items: CartItem[];
   addToCart: (item: any, quantity: number) => void;
   removeFromCart: (cartId: string) => void;
   clearCart: () => void;
   cartTotal: number;
-  cartCount: number; // <--- O ERRO ESTAVA AQUI (Faltava essa linha)
+  cartCount: number;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export function CartProvider({ children }: { children: ReactNode }) {
+  // Inicializa sempre como array vazio para evitar erro de undefined
   const [items, setItems] = useState<CartItem[]>([]);
+  const [isLoaded, setIsLoaded] = useState(false);
 
-  // Carrega do LocalStorage ao iniciar
+  // Carrega do LocalStorage com segurança
   useEffect(() => {
-    const saved = localStorage.getItem("cart");
-    if (saved) setItems(JSON.parse(saved));
+    try {
+      const saved = localStorage.getItem("cart");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Verifica se é realmente uma lista (Array). Se não for, reseta.
+        if (Array.isArray(parsed)) {
+          setItems(parsed);
+        } else {
+          console.warn("Carrinho corrompido, resetando...");
+          localStorage.removeItem("cart");
+          setItems([]);
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao ler carrinho:", error);
+      localStorage.removeItem("cart");
+      setItems([]);
+    } finally {
+      setIsLoaded(true);
+    }
   }, []);
 
-  // Salva no LocalStorage sempre que muda
+  // Salva no LocalStorage sempre que muda (só depois de ter carregado a primeira vez)
   useEffect(() => {
-    localStorage.setItem("cart", JSON.stringify(items));
-  }, [items]);
+    if (isLoaded) {
+      localStorage.setItem("cart", JSON.stringify(items));
+    }
+  }, [items, isLoaded]);
 
   const addToCart = (product: any, quantity: number) => {
     const newItem: CartItem = {
@@ -58,16 +78,17 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   const clearCart = () => {
     setItems([]);
+    localStorage.removeItem("cart");
   };
 
-  // Cálculos Automáticos
-  const cartTotal = items.reduce((acc, item) => acc + item.finalPrice, 0);
+  // Garante que items é um array antes de calcular
+  const safeItems = Array.isArray(items) ? items : [];
   
-  // A SOMA DA QUANTIDADE TOTAL DE ITENS
-  const cartCount = items.reduce((acc, item) => acc + item.quantity, 0);
+  const cartTotal = safeItems.reduce((acc, item) => acc + (item.finalPrice || 0), 0);
+  const cartCount = safeItems.reduce((acc, item) => acc + (item.quantity || 0), 0);
 
   return (
-    <CartContext.Provider value={{ items, addToCart, removeFromCart, clearCart, cartTotal, cartCount }}>
+    <CartContext.Provider value={{ items: safeItems, addToCart, removeFromCart, clearCart, cartTotal, cartCount }}>
       {children}
     </CartContext.Provider>
   );
