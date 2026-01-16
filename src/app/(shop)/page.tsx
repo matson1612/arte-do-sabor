@@ -36,11 +36,15 @@ export default function ShopHome() {
 
         const items = snapshot.docs.map((doc) => {
           const data = doc.data();
-          // TRATAMENTO DE PREÇO (Evita NaN)
+          
+          // --- CORREÇÃO DO NaN ---
+          // Tenta converter qualquer formato de preço para número
           let price = data.price;
           if (typeof price === 'string') {
+             // Troca vírgula por ponto e converte
              price = parseFloat(price.replace(',', '.'));
           }
+          // Se ainda falhar, assume zero
           if (!price || isNaN(price)) price = 0;
 
           return { id: doc.id, ...data, price };
@@ -74,7 +78,8 @@ export default function ShopHome() {
   const handleAddToCart = () => {
     if (selectedProduct) {
       addToCart(selectedProduct, quantity);
-      setSelectedProduct(null); // Fecha modal
+      setSelectedProduct(null); // Fecha modal após adicionar
+      setQuantity(1);
     }
   };
 
@@ -106,11 +111,11 @@ export default function ShopHome() {
                 <div 
                     key={product.id} 
                     onClick={() => openModal(product)} // Clicar no card abre o modal
-                    className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex gap-3 cursor-pointer hover:border-pink-300 transition-colors"
+                    className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex gap-3 cursor-pointer hover:border-pink-300 transition-colors group"
                 >
-                  <div className="w-24 h-24 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0">
+                  <div className="w-24 h-24 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 relative">
                     {product.imageUrl ? (
-                      <img src={product.imageUrl} className="w-full h-full object-cover" />
+                      <img src={product.imageUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     ) : (
                       <ImageOff className="m-auto mt-8 text-gray-300" size={20} />
                     )}
@@ -124,7 +129,7 @@ export default function ShopHome() {
                       <span className="font-bold text-green-600 text-sm">
                         {product.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                       </span>
-                      <button className="bg-pink-50 text-pink-600 p-1.5 rounded-full">
+                      <button className="bg-pink-50 text-pink-600 p-1.5 rounded-full hover:bg-pink-600 hover:text-white transition-colors">
                         <Plus size={16} />
                       </button>
                     </div>
@@ -136,18 +141,21 @@ export default function ShopHome() {
         ))
       )}
 
-      {/* --- MODAL DE DETALHES DO PRODUTO --- */}
+      {/* --- MODAL DE DETALHES DO PRODUTO (OVERLAY) --- */}
       {selectedProduct && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4 animate-in fade-in duration-200">
-            <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-10">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4 animate-in fade-in duration-200 backdrop-blur-sm">
+            {/* Clique fora para fechar */}
+            <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
+
+            <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-10 z-10">
                 
                 {/* Botão Fechar */}
-                <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-10 bg-black/20 text-white p-1 rounded-full hover:bg-black/40">
+                <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-black/20 text-white p-1 rounded-full hover:bg-black/40 backdrop-blur-md">
                     <X size={20}/>
                 </button>
 
                 {/* Imagem Grande */}
-                <div className="h-48 bg-gray-100 relative">
+                <div className="h-56 bg-gray-100 relative">
                     {selectedProduct.imageUrl ? (
                          <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" />
                     ) : (
@@ -157,23 +165,26 @@ export default function ShopHome() {
 
                 {/* Conteúdo */}
                 <div className="p-6">
-                    <h2 className="text-xl font-bold text-gray-800">{selectedProduct.name}</h2>
-                    <p className="text-sm text-gray-500 mt-2 mb-4">{selectedProduct.description}</p>
-                    <div className="text-2xl font-bold text-green-600 mb-6">
-                        {selectedProduct.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    <div className="flex justify-between items-start mb-2">
+                        <h2 className="text-xl font-bold text-gray-800">{selectedProduct.name}</h2>
+                        <div className="text-xl font-bold text-green-600">
+                            {selectedProduct.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        </div>
                     </div>
+                    
+                    <p className="text-sm text-gray-500 mb-6 leading-relaxed">{selectedProduct.description || "Sem descrição adicional."}</p>
 
                     {/* Controles de Quantidade e Adicionar */}
                     <div className="flex items-center gap-4">
-                        <div className="flex items-center border rounded-lg overflow-hidden">
-                            <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="p-3 hover:bg-gray-100 text-gray-600"><Minus size={18}/></button>
-                            <span className="w-10 text-center font-bold">{quantity}</span>
-                            <button onClick={() => setQuantity(q => q + 1)} className="p-3 hover:bg-gray-100 text-pink-600"><Plus size={18}/></button>
+                        <div className="flex items-center border rounded-xl overflow-hidden bg-gray-50">
+                            <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="p-3.5 hover:bg-gray-200 text-gray-600 active:bg-gray-300"><Minus size={18}/></button>
+                            <span className="w-8 text-center font-bold text-lg">{quantity}</span>
+                            <button onClick={() => setQuantity(q => q + 1)} className="p-3.5 hover:bg-gray-200 text-pink-600 active:bg-gray-300"><Plus size={18}/></button>
                         </div>
                         
-                        <button onClick={handleAddToCart} className="flex-1 bg-pink-600 text-white font-bold py-3 rounded-lg hover:bg-pink-700 active:scale-95 transition-transform flex justify-center items-center gap-2">
+                        <button onClick={handleAddToCart} className="flex-1 bg-pink-600 text-white font-bold py-3.5 rounded-xl hover:bg-pink-700 active:scale-95 transition-all flex justify-center items-center gap-2 shadow-lg shadow-pink-200">
                             <span>Adicionar</span>
-                            <span className="bg-pink-700 px-2 py-0.5 rounded text-xs">
+                            <span className="bg-pink-700/50 px-2 py-0.5 rounded text-xs">
                                 {(selectedProduct.price * quantity).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                             </span>
                         </button>
