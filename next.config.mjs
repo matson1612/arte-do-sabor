@@ -1,13 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   typescript: {
-    // Ignora erros de tipagem para publicar
+    // !! ATENÇÃO !!
+    // Ignora erros de tipo para permitir o deploy na Vercel
     ignoreBuildErrors: true,
   },
   eslint: {
-    // Ignora o lint durante o build (configuração correta para Next.js 16)
+    // Ignora alertas de estilo para permitir o deploy
     ignoreDuringBuilds: true,
-  }
+  },
 };
 
 export default nextConfig;
