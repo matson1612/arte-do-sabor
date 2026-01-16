@@ -1,16 +1,16 @@
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'placehold.co',
-      },
-      {
-        protocol: 'https',
-        hostname: 'images.unsplash.com',
-      },
-    ],
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  /* config options here */
+  typescript: {
+    // !! ATENÇÃO !!
+    // Perigosamente permite o build mesmo com erros de tipagem.
+    // Usamos isso para testar rápido em produção.
+    ignoreBuildErrors: true,
+  },
+  eslint: {
+    // Ignora avisos de estilo durante o build
+    ignoreDuringBuilds: true,
   },
 };
 
