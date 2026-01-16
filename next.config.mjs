@@ -1,13 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   typescript: {
-    // !! ATENÇÃO !!
-    // Ignora erros de tipo para permitir o deploy na Vercel
+    // Ignora erros de TypeScript (como o NaN)
     ignoreBuildErrors: true,
-  },
-  eslint: {
-    // Ignora alertas de estilo para permitir o deploy
-    ignoreDuringBuilds: true,
   },
 };
 
