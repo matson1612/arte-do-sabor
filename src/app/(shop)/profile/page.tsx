@@ -19,8 +19,8 @@ const mapContainerStyle = {
 // Centro padrão (Palmas - TO)
 const defaultCenter = { lat: -10.183760, lng: -48.333650 };
 
-// ⚠️ COLOQUE SUA CHAVE AQUI
-const GOOGLE_MAPS_API_KEY = "SUA_CHAVE_DO_GOOGLE_AQUI"; 
+// ⚠️ SUA CHAVE CORRETA JÁ ESTÁ AQUI:
+const GOOGLE_MAPS_API_KEY = "AIzaSyBy365txh8nJ9JuGfvyPGdW5-angEXWBj8"; 
 
 export default function ProfilePage() {
   const { user, logout } = useAuth();
@@ -55,7 +55,10 @@ export default function ProfilePage() {
 
   // Carrega dados do usuário ao abrir
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+        setDataLoading(false);
+        return;
+    }
     
     const loadProfile = async () => {
         try {
@@ -68,8 +71,6 @@ export default function ProfilePage() {
                 setPhone(data.phone || "");
                 if (data.address) setAddress(data.address);
                 if (data.location) setLocation(data.location);
-                // Tenta preencher o CEP se tiver algo salvo no endereço (opcional)
-                // mas geralmente não salvamos o CEP separado, o usuário digita de novo se quiser buscar
             } else {
                 setName(user.displayName || "");
             }
@@ -82,7 +83,7 @@ export default function ProfilePage() {
     loadProfile();
   }, [user]);
 
-  // --- BUSCA POR CEP (IGUAL AO CARRINHO) ---
+  // --- BUSCA POR CEP ---
   const handleBuscaCep = async () => {
     const cep = cepInput.replace(/\D/g, '');
     if (cep.length !== 8) return alert("CEP inválido.");
@@ -105,10 +106,10 @@ export default function ProfilePage() {
             district: data.bairro,
             city: data.localidade,
             state: data.uf,
-            number: "" // Limpa número
+            number: "" 
         }));
 
-        // 2. Google Maps (Busca SÓ pelo CEP para evitar confusão)
+        // 2. Google Maps (Busca SÓ pelo CEP)
         if (window.google && window.google.maps) {
             const geocoder = new window.google.maps.Geocoder();
             geocoder.geocode({ address: cep }, (results, status) => {
@@ -166,6 +167,8 @@ export default function ProfilePage() {
 
   if (dataLoading) return <div className="flex h-screen items-center justify-center"><Loader2 className="animate-spin text-pink-600"/></div>;
 
+  if (!user) return <div className="p-10 text-center">Faça login para ver seu perfil.</div>;
+
   return (
     <div className="pb-24 pt-6 px-4 max-w-lg mx-auto bg-gray-50 min-h-screen">
       <div className="flex justify-between items-center mb-6">
@@ -220,7 +223,7 @@ export default function ProfilePage() {
                         center={location} 
                         zoom={15} 
                         onLoad={map => { mapRef.current = map; }}
-                        options={{streetViewControl:false, mapTypeControl:false}}
+                        options={{streetViewControl:false, mapTypeControl:false, gestureHandling: "greedy"}}
                     >
                         <Marker 
                             position={location} 
