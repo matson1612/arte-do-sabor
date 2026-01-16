@@ -1,11 +1,25 @@
 // src/app/(admin)/admin/settings/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
-import { Save, MapPin, Building2, Phone, Lock, LocateFixed } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { Save, MapPin, Building2, Phone, Lock, LocateFixed, Loader2 } from "lucide-react";
 import { getStoreSettings, saveStoreSettings } from "@/services/settingsService";
 import { StoreSettings } from "@/types";
 import { useRouter } from "next/navigation";
+import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
+
+// Configurações do Mapa
+const mapContainerStyle = {
+  width: '100%',
+  height: '400px',
+  borderRadius: '0.75rem'
+};
+
+// Centro padrão (Palmas - TO) caso não tenha nada salvo
+const defaultCenter = {
+  lat: -10.183760,
+  lng: -48.333650
+};
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -14,14 +28,28 @@ export default function SettingsPage() {
     storeName: "",
     cnpj: "",
     phone: "",
-    authorizedEmail: "", // IMPORTANTE: Coloque seu email aqui
+    authorizedEmail: "",
     address: { street: "", number: "", district: "", city: "Palmas", state: "TO" },
-    location: { lat: 0, lng: 0 }
+    location: { lat: -10.183760, lng: -48.333650 } // Valor inicial padrão
   });
 
+  // Carrega a API do Google Maps
+  const { isLoaded } = useJsApiLoader({
+    id: 'google-map-script',
+    googleMapsApiKey: "SAIzaSyBy365txh8nJ9JuGfvyPGdW5-angEXWBj8" // <--- COLOQUE SUA CHAVE AQUI ⚠️
+  });
+
+  // Busca dados salvos
   useEffect(() => {
     getStoreSettings().then(data => {
-      if (data) setFormData(data);
+      if (data) {
+        // Garante que location tenha valores numéricos válidos
+        const loadedLocation = {
+           lat: Number(data.location?.lat) || defaultCenter.lat,
+           lng: Number(data.location?.lng) || defaultCenter.lng
+        };
+        setFormData({ ...data, location: loadedLocation });
+      }
     });
   }, []);
 
@@ -30,7 +58,7 @@ export default function SettingsPage() {
     setLoading(true);
     try {
       await saveStoreSettings(formData);
-      alert("Configurações salvas! O sistema já está atualizado.");
+      alert("Configurações salvas! A localização da loja foi atualizada.");
     } catch (error) {
       alert("Erro ao salvar.");
     } finally {
@@ -38,18 +66,30 @@ export default function SettingsPage() {
     }
   };
 
+  // Botão para usar o GPS do navegador e centralizar o mapa
   const getMyLocation = () => {
+    if (!navigator.geolocation) return alert("Navegador sem suporte a GPS.");
+    
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setFormData(prev => ({
-          ...prev, 
-          location: { lat: pos.coords.latitude, lng: pos.coords.longitude }
-        }));
-        alert(`Localização capturada: ${pos.coords.latitude}, ${pos.coords.longitude}`);
+        const newPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setFormData(prev => ({ ...prev, location: newPos }));
       },
       (err) => alert("Erro ao pegar GPS. Permita o acesso.")
     );
   };
+
+  // Quando arrastar o pino no mapa
+  const onMarkerDragEnd = useCallback((e: google.maps.MapMouseEvent) => {
+    if (e.latLng) {
+      const newLat = e.latLng.lat();
+      const newLng = e.latLng.lng();
+      setFormData(prev => ({
+        ...prev,
+        location: { lat: newLat, lng: newLng }
+      }));
+    }
+  }, []);
 
   return (
     <div className="max-w-4xl mx-auto pb-20">
@@ -70,7 +110,7 @@ export default function SettingsPage() {
                     <input className="w-full p-2 border rounded" value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} />
                 </div>
                 <div>
-                    <label className="text-xs font-bold text-gray-500 uppercase">WhatsApp de Pedidos (Ex: 5511999999999)</label>
+                    <label className="text-xs font-bold text-gray-500 uppercase">WhatsApp (Ex: 5563999999999)</label>
                     <div className="relative">
                         <Phone className="absolute left-3 top-2.5 text-gray-400" size={16}/>
                         <input className="w-full pl-10 p-2 border rounded" placeholder="55..." value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
@@ -82,34 +122,54 @@ export default function SettingsPage() {
         {/* SEGURANÇA */}
         <div className="bg-white p-6 rounded-xl border shadow-sm space-y-4 border-l-4 border-l-red-500">
             <h2 className="font-bold flex items-center gap-2 text-red-600"><Lock size={20}/> Segurança do Admin</h2>
-            <p className="text-sm text-gray-500">Apenas este e-mail poderá acessar o painel administrativo.</p>
             <div>
                 <label className="text-xs font-bold text-gray-500 uppercase">E-mail do Dono (Google)</label>
                 <input required className="w-full p-2 border rounded font-bold" placeholder="seu.email@gmail.com" value={formData.authorizedEmail} onChange={e => setFormData({...formData, authorizedEmail: e.target.value})} />
             </div>
         </div>
 
-        {/* ENDEREÇO & LOCALIZAÇÃO */}
+        {/* LOCALIZAÇÃO COM GOOGLE MAPS */}
         <div className="bg-white p-6 rounded-xl border shadow-sm space-y-4">
-            <h2 className="font-bold flex items-center gap-2 text-blue-600"><MapPin size={20}/> Localização (Para Frete)</h2>
+            <div className="flex justify-between items-center">
+                <h2 className="font-bold flex items-center gap-2 text-blue-600"><MapPin size={20}/> Localização e Endereço</h2>
+                <button type="button" onClick={getMyLocation} className="bg-blue-600 text-white px-3 py-1 rounded text-sm font-bold flex items-center gap-2 hover:bg-blue-700">
+                    <LocateFixed size={16}/> Usar Meu GPS Atual
+                </button>
+            </div>
             
-            <div className="bg-blue-50 p-4 rounded border border-blue-100 mb-4">
-                <div className="flex justify-between items-center">
-                    <div>
-                        <span className="font-bold text-blue-800 block">Ponto GPS da Loja</span>
-                        <span className="text-xs text-blue-600">Usado para calcular a distância do cliente</span>
+            <p className="text-sm text-gray-500">Arraste o pino vermelho no mapa para marcar a <b>localização exata da loja</b>. Isso será usado para calcular o frete.</p>
+
+            {/* MAPA */}
+            <div className="border rounded-xl overflow-hidden shadow-inner bg-gray-100 relative">
+                {isLoaded ? (
+                    <GoogleMap
+                        mapContainerStyle={mapContainerStyle}
+                        center={formData.location} // Centraliza onde está salvo
+                        zoom={15}
+                        options={{ streetViewControl: false, mapTypeControl: false }}
+                    >
+                        {/* Marcador Arrastável */}
+                        <Marker
+                            position={formData.location}
+                            draggable={true}
+                            onDragEnd={onMarkerDragEnd}
+                            title="Local da Loja"
+                        />
+                    </GoogleMap>
+                ) : (
+                    <div className="h-[400px] flex items-center justify-center text-gray-400 gap-2">
+                        <Loader2 className="animate-spin"/> Carregando Mapa...
                     </div>
-                    <button type="button" onClick={getMyLocation} className="bg-blue-600 text-white px-3 py-1 rounded text-sm font-bold flex items-center gap-2 hover:bg-blue-700">
-                        <LocateFixed size={16}/> Pegar Minha Posição Atual
-                    </button>
-                </div>
-                <div className="mt-2 flex gap-4 text-sm font-mono text-gray-600">
-                    <span>Lat: {formData.location.lat}</span>
-                    <span>Lng: {formData.location.lng}</span>
+                )}
+                
+                {/* Mostrador de Coordenadas */}
+                <div className="absolute bottom-2 left-2 bg-white/90 px-3 py-1 rounded text-xs font-mono shadow text-gray-600">
+                    Lat: {formData.location.lat.toFixed(6)} | Lng: {formData.location.lng.toFixed(6)}
                 </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
+            {/* Campos de Endereço Escrito */}
+            <div className="grid grid-cols-3 gap-4 mt-4">
                 <div className="col-span-2">
                     <label className="text-xs font-bold text-gray-500 uppercase">Rua</label>
                     <input className="w-full p-2 border rounded" value={formData.address.street} onChange={e => setFormData({...formData, address: {...formData.address, street: e.target.value}})} />
