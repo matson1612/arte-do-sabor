@@ -2,15 +2,17 @@
 
 export type ClientType = 'standard' | 'monthly';
 
+// Correção do erro "Module has no exported member OrderStatus"
+export type OrderStatus = 'em_aberto' | 'produzindo' | 'entrega' | 'finalizado' | 'cancelado';
+
 export interface Option {
   id: string;
   name: string;
-  priceAdd: number;          
-  priceAddPostpaid?: number; 
-  
+  priceAdd: number;
+  priceAddPostpaid?: number; // Preço a prazo
   isAvailable: boolean;
-  stock: number | null;     
-  linkedProductId?: string; 
+  stock: number | null;
+  linkedProductId?: string;
 }
 
 export interface ComplementGroup {
@@ -25,25 +27,22 @@ export interface Product {
   id: string;
   name: string;
   description: string;
-  
-  // Preços do Banco
-  basePrice: number;       
-  pricePostpaid?: number;  
-
+  basePrice: number;
+  pricePostpaid?: number; // Preço a prazo
   imageUrl: string;
   category: string;
   
   // Disponibilidade
-  isAvailable: boolean;         
-  availableStandard?: boolean;  
-  availablePostpaid?: boolean;  
+  isAvailable: boolean;
+  availableStandard?: boolean;
+  availablePostpaid?: boolean;
 
   stock: number | null;
-  complementGroupIds: string[]; 
-
-  // --- CAMPOS DE APOIO AO FRONT-END (Opcionais) ---
-  price?: number; // Preço final calculado para exibição
-  fullGroups?: ComplementGroup[]; // Grupos carregados
+  complementGroupIds: string[];
+  
+  // Auxiliares do front
+  price?: number; 
+  fullGroups?: ComplementGroup[];
 }
 
 export interface CartItem extends Product {
@@ -58,28 +57,35 @@ export interface UserProfile {
   name: string;
   email: string;
   photoURL?: string;
-  clientType?: ClientType;
+  clientType?: ClientType; // 'standard' ou 'monthly'
   createdAt: any;
   phone?: string;
   address?: any;
 }
 
+// Correção dos erros "Property does not exist on type Order"
 export interface Order {
   id: string;
   userId: string;
   userName: string;
   userPhone: string;
-  items: string; // JSON
+  items: string; // JSON string
   total: number;
-  status: "em_aberto" | "em_preparo" | "entrega" | "finalizado" | "cancelado";
+  status: OrderStatus; // Usa o tipo novo
   createdAt: any;
+  
+  // Novos campos obrigatórios
+  paymentMethod: string;
+  deliveryMethod: string;
+  shippingPrice: number;
+  address?: any;
 }
 
 export interface StoreSettings {
-  id?: string; 
+  id?: string;
   storeName: string;
   cnpj: string;
-  phone: string; 
+  phone: string;
   address: {
     street: string;
     number: string;
@@ -91,5 +97,5 @@ export interface StoreSettings {
     lat: number;
     lng: number;
   };
-  authorizedEmail: string; 
+  authorizedEmail: string;
 }
