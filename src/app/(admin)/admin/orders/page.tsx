@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
 import { collection, query, orderBy, onSnapshot, doc, updateDoc } from "firebase/firestore";
 import { Order, OrderStatus } from "@/types";
-import { Loader2, Filter, Clock, Truck, CheckCircle, ChefHat } from "lucide-react";
+import { Loader2, Filter, Clock, Truck, CheckCircle, ChefHat, DollarSign, MessageCircle } from "lucide-react";
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -22,12 +22,36 @@ export default function AdminOrdersPage() {
     return () => unsubscribe();
   }, []);
 
-  const updateStatus = async (id: string, newStatus: OrderStatus) => {
+  // Função que atualiza status E avisa no WhatsApp
+  const updateStatus = async (order: Order, newStatus: OrderStatus) => {
     try {
-        await updateDoc(doc(db, "orders", id), { status: newStatus });
+        // 1. Atualiza no Banco
+        await updateDoc(doc(db, "orders", order.id), { status: newStatus });
+        
+        // 2. Monta mensagem do WhatsApp
+        const phone = order.userPhone?.replace(/\D/g, '');
+        if (phone && newStatus !== 'em_aberto') {
+            const statusMsg = {
+                'produzindo': `👨‍🍳 Olá ${order.userName}, seu pedido já está sendo preparado!`,
+                'entrega': `🛵 Oba! Seu pedido saiu para entrega.`,
+                'finalizado': `✅ Pedido entregue/finalizado. Obrigado pela preferência!`,
+                'cancelado': `❌ Seu pedido foi cancelado. Entre em contato para mais detalhes.`
+            }[newStatus] || `O status do seu pedido mudou para: ${newStatus}`;
+
+            // Abre o WhatsApp em nova aba
+            const url = `https://wa.me/${phone}?text=${encodeURIComponent(statusMsg)}`;
+            window.open(url, '_blank');
+        }
+
     } catch (e) {
         alert("Erro ao atualizar status");
     }
+  };
+
+  // Função exclusiva para quitar boleta
+  const handleQuitarBoleta = async (order: Order) => {
+      if(!confirm(`Confirmar pagamento/quitação do pedido de R$ ${order.total.toFixed(2)}?`)) return;
+      await updateStatus(order, 'finalizado');
   };
 
   const filteredOrders = filter === "todos" ? orders : orders.filter(o => o.status === filter);
@@ -59,8 +83,8 @@ export default function AdminOrdersPage() {
                 onChange={e => setFilter(e.target.value)}
               >
                   <option value="todos">Todos</option>
-                  <option value="em_aberto">🟡 Em Aberto</option>
-                  <option value="produzindo">👨‍🍳 Produzindo</option>
+                  <option value="em_aberto">🟡 Em Aberto (Boletas)</option>
+                  <option value="produzindo">👨‍🍳 Em Produção</option>
                   <option value="entrega">🛵 Em Rota</option>
                   <option value="finalizado">✅ Finalizados</option>
                   <option value="cancelado">❌ Cancelados</option>
@@ -75,8 +99,11 @@ export default function AdminOrdersPage() {
             let items: any[] = [];
             try { items = JSON.parse(order.items); } catch(e){}
 
+            // Identifica se é boleta pendente
+            const isBoletaPendente = order.paymentMethod === 'conta_aberta' && order.status !== 'finalizado' && order.status !== 'cancelado';
+
             return (
-                <div key={order.id} className={`bg-white p-4 rounded-xl shadow-sm border-l-4 ${order.status === 'finalizado' ? 'border-l-green-500 opacity-80' : order.status === 'cancelado' ? 'border-l-red-500 opacity-60' : 'border-l-blue-500'}`}>
+                <div key={order.id} className={`bg-white p-4 rounded-xl shadow-sm border-l-4 ${order.status === 'finalizado' ? 'border-l-green-500 opacity-70' : isBoletaPendente ? 'border-l-purple-500' : 'border-l-blue-500'}`}>
                     <div className="flex flex-col lg:flex-row justify-between gap-6">
                         
                         <div className="flex-1">
@@ -87,9 +114,11 @@ export default function AdminOrdersPage() {
                                         <Clock size={10}/> {date.toLocaleDateString()} às {date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                                     </p>
                                 </div>
-                                <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${order.paymentMethod === 'conta_aberta' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
-                                    {order.paymentMethod === 'conta_aberta' ? 'CONTA MENSAL' : order.paymentMethod}
-                                </span>
+                                <div className="text-right">
+                                    <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase block mb-1 ${order.paymentMethod === 'conta_aberta' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
+                                        {order.paymentMethod === 'conta_aberta' ? 'CONTA MENSAL' : order.paymentMethod}
+                                    </span>
+                                </div>
                             </div>
 
                             <div className="mt-3 bg-gray-50 p-3 rounded text-sm text-gray-700 space-y-1 border border-gray-100">
@@ -108,20 +137,35 @@ export default function AdminOrdersPage() {
                             </div>
                         </div>
 
-                        <div className="flex flex-col gap-2 min-w-[180px] border-t lg:border-t-0 lg:border-l pt-3 lg:pt-0 lg:pl-6 justify-center">
+                        {/* Painel de Controle */}
+                        <div className="flex flex-col gap-2 min-w-[200px] border-t lg:border-t-0 lg:border-l pt-3 lg:pt-0 lg:pl-6 justify-center">
+                            
                             <div className={`p-2 rounded border text-center font-bold text-xs uppercase mb-2 ${getStatusColor(order.status)}`}>
-                                {order.status === 'em_aberto' && 'Aguardando'}
-                                {order.status === 'produzindo' && 'Produzindo'}
-                                {order.status === 'entrega' && 'Na Rua'}
-                                {order.status === 'finalizado' && 'Concluído'}
-                                {order.status === 'cancelado' && 'Cancelado'}
+                                {isBoletaPendente ? 'AGUARDANDO QUITAÇÃO' : order.status.replace('_', ' ')}
                             </div>
                             
-                            <div className="grid grid-cols-2 gap-2">
-                                <button onClick={() => updateStatus(order.id, 'produzindo')} className="p-2 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 text-xs font-bold flex flex-col items-center gap-1 border border-blue-100"><ChefHat size={16}/> Produzir</button>
-                                <button onClick={() => updateStatus(order.id, 'entrega')} className="p-2 bg-orange-50 text-orange-600 rounded hover:bg-orange-100 text-xs font-bold flex flex-col items-center gap-1 border border-orange-100"><Truck size={16}/> Rota</button>
-                                <button onClick={() => updateStatus(order.id, 'finalizado')} className="col-span-2 p-2 bg-green-50 text-green-600 rounded hover:bg-green-100 text-xs font-bold flex items-center justify-center gap-2 border border-green-100"><CheckCircle size={16}/> Finalizar</button>
-                            </div>
+                            {/* Se for boleta pendente, mostra botão de Quitar. Senão, mostra fluxo normal */}
+                            {isBoletaPendente ? (
+                                <div className="space-y-2">
+                                    <button onClick={() => updateStatus(order, 'produzindo')} className="w-full p-2 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 text-xs font-bold flex items-center justify-center gap-1"><ChefHat size={14}/> Produzir</button>
+                                    <button onClick={() => handleQuitarBoleta(order)} className="w-full p-3 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-bold flex items-center justify-center gap-2 shadow-sm animate-pulse">
+                                        <DollarSign size={16}/> QUITAR BOLETA
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button onClick={() => updateStatus(order, 'produzindo')} className="p-2 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 text-xs font-bold flex flex-col items-center gap-1 border border-blue-100"><ChefHat size={16}/> Produzir</button>
+                                    <button onClick={() => updateStatus(order, 'entrega')} className="p-2 bg-orange-50 text-orange-600 rounded hover:bg-orange-100 text-xs font-bold flex flex-col items-center gap-1 border border-orange-100"><Truck size={16}/> Rota</button>
+                                    <button onClick={() => updateStatus(order, 'finalizado')} className="col-span-2 p-2 bg-green-50 text-green-600 rounded hover:bg-green-100 text-xs font-bold flex items-center justify-center gap-2 border border-green-100"><CheckCircle size={16}/> Finalizar</button>
+                                </div>
+                            )}
+                            
+                            {/* Botão Extra para só avisar no Whats sem mudar status */}
+                            {order.userPhone && (
+                                <button onClick={() => window.open(`https://wa.me/${order.userPhone?.replace(/\D/g, '')}`, '_blank')} className="mt-2 text-xs text-gray-400 hover:text-green-600 flex items-center justify-center gap-1">
+                                    <MessageCircle size={12}/> Abrir Conversa
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>
