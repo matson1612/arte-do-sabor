@@ -1,10 +1,11 @@
+// src/app/(shop)/orders/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
-import { collection, query, where, orderBy, getDocs } from "firebase/firestore";
-import { Loader2, ShoppingBag, Clock, CheckCircle, XCircle } from "lucide-react";
+import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore";
+import { Loader2, ShoppingBag, Clock, CheckCircle, XCircle, Package } from "lucide-react";
 import Link from "next/link";
 
 export default function MyOrdersPage() {
@@ -15,24 +16,23 @@ export default function MyOrdersPage() {
   useEffect(() => {
     if (!user) return;
 
-    const fetchOrders = async () => {
-      try {
-        // Busca pedidos onde userId == id do usuario logado
-        const q = query(
-          collection(db, "orders"),
-          where("userId", "==", user.uid),
-          orderBy("createdAt", "desc")
-        );
-        const snapshot = await getDocs(q);
-        setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      } catch (error) {
-        console.error("Erro ao buscar pedidos:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
+    // Use onSnapshot para ATUALIZAÇÃO EM TEMPO REAL
+    const q = query(
+      collection(db, "orders"),
+      where("userId", "==", user.uid),
+      orderBy("createdAt", "desc")
+    );
 
-    fetchOrders();
+    const unsubscribe = onSnapshot(q, (snap) => {
+        const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setOrders(data);
+        setLoading(false);
+    }, (error) => {
+        console.error("Erro orders:", error);
+        setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, [user]);
 
   if (!user) return <div className="p-10 text-center">Faça login para ver seus pedidos.</div>;
@@ -50,32 +50,40 @@ export default function MyOrdersPage() {
         </div>
       ) : (
         <div className="space-y-4">
-            {orders.map((order) => (
-                <div key={order.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                    <div className="flex justify-between items-start mb-2">
-                        <div>
-                            <span className="text-xs text-gray-400 font-mono">#{order.id.slice(0,6)}</span>
-                            <p className="font-bold text-gray-800">
-                                {new Date(order.createdAt?.seconds * 1000).toLocaleDateString('pt-BR')}
-                            </p>
-                        </div>
-                        <StatusBadge status={order.status} />
-                    </div>
+            {orders.map((order) => {
+                const date = order.createdAt ? new Date(order.createdAt.seconds * 1000) : new Date();
+                // Tenta fazer parse dos itens, se falhar cria array vazio
+                let itemsList: any[] = [];
+                try { itemsList = JSON.parse(order.items); } catch(e){}
 
-                    <div className="border-t border-b py-2 my-2 space-y-1">
-                        {order.items.map((item: any, idx: number) => (
-                            <div key={idx} className="text-sm text-gray-600 flex justify-between">
-                                <span>{item.quantity}x {item.name}</span>
+                return (
+                    <div key={order.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                        <div className="flex justify-between items-start mb-2">
+                            <div>
+                                {/* MOSTRA O SHORT ID */}
+                                <span className="text-sm font-bold text-slate-800 block">Pedido #{order.shortId || order.id.slice(0,4)}</span>
+                                <p className="text-xs text-gray-500">
+                                    {date.toLocaleDateString('pt-BR')} às {date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                </p>
                             </div>
-                        ))}
-                    </div>
+                            <StatusBadge status={order.status} />
+                        </div>
 
-                    <div className="flex justify-between items-center mt-3">
-                        <span className="text-sm text-gray-500">Total</span>
-                        <span className="font-bold text-lg text-green-600">R$ {order.total.toFixed(2)}</span>
+                        <div className="border-t border-b py-2 my-2 space-y-1">
+                            {itemsList.map((item: any, idx: number) => (
+                                <div key={idx} className="text-sm text-gray-600 flex justify-between">
+                                    <span>{item.quantity}x {item.name}</span>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="flex justify-between items-center mt-3">
+                            <span className="text-xs text-gray-500 font-bold uppercase">{order.paymentMethod === 'conta_aberta' ? 'Na Conta' : order.paymentMethod}</span>
+                            <span className="font-bold text-lg text-green-600">R$ {order.total.toFixed(2)}</span>
+                        </div>
                     </div>
-                </div>
-            ))}
+                );
+            })}
         </div>
       )}
     </div>
@@ -84,14 +92,14 @@ export default function MyOrdersPage() {
 
 function StatusBadge({ status }: { status: string }) {
     const styles: any = {
-        'pendente': { bg: 'bg-yellow-100', text: 'text-yellow-700', icon: Clock, label: 'Pendente' },
-        'preparando': { bg: 'bg-blue-100', text: 'text-blue-700', icon: Loader2, label: 'Preparando' },
-        'entregando': { bg: 'bg-purple-100', text: 'text-purple-700', icon: ShoppingBag, label: 'Saiu p/ Entrega' },
-        'concluido': { bg: 'bg-green-100', text: 'text-green-700', icon: CheckCircle, label: 'Entregue' },
+        'em_aberto': { bg: 'bg-yellow-100', text: 'text-yellow-700', icon: Clock, label: 'Recebido' },
+        'produzindo': { bg: 'bg-blue-100', text: 'text-blue-700', icon: Loader2, label: 'Preparando' },
+        'entrega': { bg: 'bg-purple-100', text: 'text-purple-700', icon: ShoppingBag, label: 'Saiu p/ Entrega' },
+        'finalizado': { bg: 'bg-green-100', text: 'text-green-700', icon: CheckCircle, label: 'Entregue' },
         'cancelado': { bg: 'bg-red-100', text: 'text-red-700', icon: XCircle, label: 'Cancelado' },
     };
 
-    const current = styles[status] || styles['pendente'];
+    const current = styles[status] || styles['em_aberto'];
     const Icon = current.icon;
 
     return (

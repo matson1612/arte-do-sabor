@@ -9,12 +9,12 @@ import { useState, useRef, useEffect } from "react";
 import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
 import { db } from "@/lib/firebase";
 import { doc, getDoc, addDoc, collection, serverTimestamp } from "firebase/firestore";
+// Importe a função que você criou
+import { generateShortId } from "@/utils/generateId"; 
 
 const PHONE_NUMBER = "5563981221181"; 
 const GOOGLE_MAPS_API_KEY = "AIzaSyBy365txh8nJ9JuGfvyPGdW5-angEXWBj8"; 
 const DEFAULT_CENTER = { lat: -10.183760, lng: -48.333650 }; 
-
-const mapContainerStyle = { width: '100%', height: '250px', borderRadius: '0.75rem' };
 
 const REGIONS = [
     { id: 'plano', label: 'Plano Diretor / Centro (Calculado por KM)', price: 'gps' },
@@ -38,34 +38,31 @@ export default function CartPage() {
   const [selectedRegionId, setSelectedRegionId] = useState('plano');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const mapRef = useRef<google.maps.Map | null>(null);
   const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_MAPS_API_KEY });
 
-  // Verifica se é mensalista
   const isMonthlyClient = profile?.clientType === 'monthly';
 
   useEffect(() => {
     if (!user) return;
     const fetchProfile = async () => {
-        const snap = await getDoc(doc(db, "users", user.uid));
-        if (snap.exists()) {
-            const data = snap.data();
-            if (data.savedAddresses && data.savedAddresses.length > 0) {
-                setSavedAddresses(data.savedAddresses);
-                setSelectedAddressId(data.savedAddresses[0].id);
+        try {
+            const snap = await getDoc(doc(db, "users", user.uid));
+            if (snap.exists()) {
+                const data = snap.data();
+                if (data.savedAddresses && data.savedAddresses.length > 0) {
+                    setSavedAddresses(data.savedAddresses);
+                    setSelectedAddressId(data.savedAddresses[0].id);
+                }
             }
-        }
+        } catch(e) { console.error(e); }
     };
     fetchProfile();
   }, [user]);
 
-  // Lógica de Frete Inteligente
   useEffect(() => {
-    // Se escolheu conta aberta, zera o frete
     if (paymentMethod === 'conta_aberta') {
         setShippingPrice(0);
     } else {
-        // Lógica normal
         if (deliveryMethod === 'pickup') {
             setShippingPrice(0);
         } else {
@@ -100,21 +97,22 @@ export default function CartPage() {
     if (isSubmitting) return;
 
     const selectedAddr = savedAddresses.find(a => a.id === selectedAddressId);
-    
-    // Validação de endereço: Só exige se for Entrega E NÃO for conta aberta
     if (deliveryMethod === 'delivery' && !selectedAddr && !address.number && paymentMethod !== 'conta_aberta') {
         return alert("Por favor, selecione ou informe um endereço.");
     }
 
     setIsSubmitting(true);
     const finalTotal = cartTotal + shippingPrice;
+    
+    // GERA O ID CURTO AQUI
+    const shortId = generateShortId(); 
 
     try {
-        // 1. SALVAR NO BANCO (com paymentMethod correto)
         await addDoc(collection(db, "orders"), {
+            shortId: shortId, // Salva o ID curto
             userId: user.uid,
             userName: profile?.name || user.displayName,
-            userPhone: profile?.phone || "", // Importante para o WhatsApp do Admin funcionar
+            userPhone: profile?.phone || "",
             items: JSON.stringify(items),
             total: finalTotal,
             status: 'em_aberto',
@@ -130,24 +128,18 @@ export default function CartPage() {
         return;
     }
 
-    // 2. WHATSAPP
-    let msg = `*NOVO PEDIDO - ${profile?.name || user.displayName}*\n`;
+    // MENSAGEM WHATSAPP COM ID CURTO
+    let msg = `*PEDIDO #${shortId} - ${profile?.name || user.displayName}*\n`;
     if (paymentMethod === 'conta_aberta') msg += `⚠️ *PEDIDO NA CONTA (MENSALISTA)*\n`;
     msg += `--------------------------------\n`;
     items.forEach(i => msg += `${i.quantity}x ${i.name}\n`);
     msg += `--------------------------------\n`;
     
-    if (paymentMethod === 'conta_aberta') {
-        msg += `📝 *Adicionar na Fatura Mensal*\n`;
-        // Se tiver endereço, manda por cortesia
-        if(deliveryMethod === 'delivery') {
-             const addr = selectedAddr || address;
-             if(addr.number) msg += `📍 Entregar em: ${addr.street}, ${addr.number}\n`;
-        }
-    } else if (deliveryMethod === 'delivery') {
+    if (deliveryMethod === 'delivery') {
         const addr = selectedAddr || address;
-        msg += `📦 *Entrega* (${shippingPrice > 0 ? `R$ ${shippingPrice.toFixed(2)}` : 'Grátis'})\n`;
-        msg += `📍 ${addr.street || addr.nickname}, ${addr.number}\n`;
+        msg += `📦 *Entrega* (${shippingPrice > 0 ? `R$ ${shippingPrice.toFixed(2)}` : 'Grátis/Conta'})\n`;
+        msg += `📍 ${addr.street || addr.nickname}, ${addr.number} - ${addr.district}\n`;
+        if (addr.complement) msg += `Obs: ${addr.complement}\n`;
         const lat = selectedAddr?.location?.lat || userLocation.lat;
         const lng = selectedAddr?.location?.lng || userLocation.lng;
         msg += `🗺️ Maps: http://googleusercontent.com/maps.google.com/?q=${lat},${lng}\n`;
@@ -185,28 +177,23 @@ export default function CartPage() {
                 <button key={p} onClick={() => setPaymentMethod(p)} className={`py-2 border rounded text-xs font-bold capitalize ${paymentMethod === p ? 'bg-pink-50 border-pink-500 text-pink-700' : 'text-gray-600'}`}>{p === 'card' ? 'Cartão' : p === 'money' ? 'Dinheiro' : 'PIX'}</button>
             ))}
             
-            {/* BOTÃO DA BOLETA (Só aparece para mensalistas) */}
             {isMonthlyClient && (
-                <button 
-                    onClick={() => setPaymentMethod('conta_aberta')} 
-                    className={`col-span-3 py-3 border-2 border-dashed rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'conta_aberta' ? 'bg-purple-100 border-purple-500 text-purple-700 ring-2 ring-purple-500 ring-offset-1' : 'border-purple-200 text-purple-600 hover:bg-purple-50'}`}
-                >
-                    <FileText size={18}/> Pagar na Conta / Boleta
+                <button onClick={() => setPaymentMethod('conta_aberta')} className={`col-span-3 py-3 border-2 border-dashed rounded text-sm font-bold flex items-center justify-center gap-2 ${paymentMethod === 'conta_aberta' ? 'bg-purple-50 border-purple-500 text-purple-700' : 'border-purple-200 text-purple-600'}`}>
+                    <FileText size={16}/> Adicionar à Conta (Sem Frete)
                 </button>
             )}
         </div>
       </div>
 
-      {/* ENTREGA (Some se for conta aberta para simplificar, mas o user pode voltar para mudar) */}
       {paymentMethod !== 'conta_aberta' && (
-          <div className="bg-white p-4 rounded-xl shadow-sm border space-y-4 mb-4 animate-in fade-in">
+          <div className="bg-white p-4 rounded-xl shadow-sm border space-y-4 mb-4">
             <h2 className="font-bold text-sm flex gap-2 items-center"><MapPin size={16} className="text-pink-600"/> Entrega</h2>
             <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
                 <button onClick={() => setDeliveryMethod('delivery')} className={`flex-1 py-2 text-sm font-bold rounded-md transition-all ${deliveryMethod === 'delivery' ? 'bg-white text-pink-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Entrega</button>
                 <button onClick={() => setDeliveryMethod('pickup')} className={`flex-1 py-2 text-sm font-bold rounded-md transition-all ${deliveryMethod === 'pickup' ? 'bg-white text-pink-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Retirar</button>
             </div>
             {deliveryMethod === 'delivery' && (
-                <div className="space-y-3">
+                <div className="space-y-3 animate-in fade-in">
                     {savedAddresses.length > 0 ? (
                         <div className="space-y-2 mb-4">
                             <p className="text-xs font-bold text-gray-500 uppercase">Selecione:</p>
@@ -233,7 +220,7 @@ export default function CartPage() {
         <div className="max-w-2xl mx-auto space-y-3">
              <div className="flex justify-between font-bold text-lg text-gray-800"><span>Total</span><span className="text-green-600">R$ {(cartTotal + shippingPrice).toFixed(2)}</span></div>
             <button onClick={handleCheckout} disabled={isSubmitting} className="w-full bg-green-600 text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-700 shadow-lg">
-                {isSubmitting ? <Loader2 className="animate-spin"/> : <><Send size={18}/> {paymentMethod === 'conta_aberta' ? 'Adicionar na Conta' : 'Enviar Pedido'}</>}
+                {isSubmitting ? <Loader2 className="animate-spin"/> : <><Send size={18}/> {paymentMethod === 'conta_aberta' ? 'Confirmar na Conta' : 'Enviar Pedido'}</>}
             </button>
         </div>
       </div>
