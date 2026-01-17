@@ -1,12 +1,16 @@
 // src/types/index.ts
 
+export type ClientType = 'standard' | 'monthly';
+
 export interface Option {
   id: string;
   name: string;
-  priceAdd: number;
+  priceAdd: number;          
+  priceAddPostpaid?: number; 
+  
   isAvailable: boolean;
-  stock: number | null;     // null = Infinito
-  linkedProductId?: string; // ID se for produto vinculado
+  stock: number | null;     
+  linkedProductId?: string; 
 }
 
 export interface ComplementGroup {
@@ -21,12 +25,25 @@ export interface Product {
   id: string;
   name: string;
   description: string;
-  basePrice: number;
+  
+  // Preços do Banco
+  basePrice: number;       
+  pricePostpaid?: number;  
+
   imageUrl: string;
   category: string;
-  isAvailable: boolean;
+  
+  // Disponibilidade
+  isAvailable: boolean;         
+  availableStandard?: boolean;  
+  availablePostpaid?: boolean;  
+
   stock: number | null;
-  complementGroupIds: string[]; // Vínculo por ID (Novo Modelo)
+  complementGroupIds: string[]; 
+
+  // --- CAMPOS DE APOIO AO FRONT-END (Opcionais) ---
+  price?: number; // Preço final calculado para exibição
+  fullGroups?: ComplementGroup[]; // Grupos carregados
 }
 
 export interface CartItem extends Product {
@@ -41,8 +58,10 @@ export interface UserProfile {
   name: string;
   email: string;
   photoURL?: string;
-  customerType: "padrao" | "fiado";
+  clientType?: ClientType;
   createdAt: any;
+  phone?: string;
+  address?: any;
 }
 
 export interface Order {
@@ -52,15 +71,15 @@ export interface Order {
   userPhone: string;
   items: string; // JSON
   total: number;
-  status: "em_aberto" | "em_preparo" | "entrega" | "finalizado";
+  status: "em_aberto" | "em_preparo" | "entrega" | "finalizado" | "cancelado";
   createdAt: any;
 }
 
 export interface StoreSettings {
-  id?: string; // Geralmente será 'general'
+  id?: string; 
   storeName: string;
   cnpj: string;
-  phone: string; // WhatsApp para receber pedidos
+  phone: string; 
   address: {
     street: string;
     number: string;
@@ -72,5 +91,5 @@ export interface StoreSettings {
     lat: number;
     lng: number;
   };
-  authorizedEmail: string; // E-mail do dono (você) para acesso Admin
+  authorizedEmail: string; 
 }

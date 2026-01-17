@@ -4,7 +4,8 @@
 import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { ArrowLeft, Save, Upload, Box, Layers, ExternalLink, X, Trash2, Pencil } from "lucide-react";
+// ADICIONEI X e Trash2 AQUI EMBAIXO:
+import { ArrowLeft, Upload, Box, Layers, Pencil, Eye, X, Trash2 } from "lucide-react";
 import { Product, ComplementGroup, Option } from "@/types";
 import { getProductById, updateProduct, getProducts } from "@/services/productService";
 import { getAllGroups, createGroup, updateGroup } from "@/services/complementService";
@@ -17,22 +18,26 @@ export default function EditProductPage({ params }: EditPageProps) {
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
 
-  // Listas Gerais
   const [allMasterGroups, setAllMasterGroups] = useState<ComplementGroup[]>([]);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   
   const [manageStock, setManageStock] = useState(false);
+  
+  // Estado Completo do Produto
   const [formData, setFormData] = useState<Product>({
-    id: "", name: "", description: "", basePrice: 0, imageUrl: "", category: "bolos", isAvailable: true, stock: null, complementGroupIds: []
+    id: "", name: "", description: "", 
+    basePrice: 0, pricePostpaid: 0, 
+    imageUrl: "", category: "bolos", 
+    isAvailable: true, 
+    availableStandard: true, availablePostpaid: true,
+    stock: null, complementGroupIds: []
   });
 
-  // --- ESTADOS DO MODAL ---
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<Partial<ComplementGroup>>({
     title: "", required: false, maxSelection: 1, options: []
   });
 
-  // 1. CARREGAR TUDO
   useEffect(() => {
     const init = async () => {
       try {
@@ -43,7 +48,16 @@ export default function EditProductPage({ params }: EditPageProps) {
         if (id) {
           const p = await getProductById(id);
           if (p) {
-            setFormData({ ...p, name: p.name || "", description: p.description || "", complementGroupIds: p.complementGroupIds || [] });
+            setFormData({ 
+                ...p, 
+                name: p.name || "", 
+                description: p.description || "", 
+                complementGroupIds: p.complementGroupIds || [],
+                // Garante valores padrão se novos campos não existirem
+                availableStandard: p.availableStandard !== false, 
+                availablePostpaid: p.availablePostpaid !== false,
+                pricePostpaid: p.pricePostpaid || 0
+            });
             setManageStock(p.stock !== null);
           }
         }
@@ -53,7 +67,6 @@ export default function EditProductPage({ params }: EditPageProps) {
     init();
   }, [id]);
 
-  // 2. SALVAR PRODUTO
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -61,19 +74,17 @@ export default function EditProductPage({ params }: EditPageProps) {
       const payload = { ...formData, stock: manageStock ? (formData.stock ?? 0) : null };
       await updateProduct(id, payload);
       alert("Produto atualizado!");
-      window.location.href = "/admin"; // Navegação segura
+      window.location.href = "/admin"; 
     } catch (error) { alert("Erro ao salvar."); } 
     finally { setLoading(false); }
   };
 
-  // --- FUNÇÕES DO MODAL ---
+  // --- MODAL LÓGICA ---
   const handleOpenModal = (groupId?: string) => {
     if (groupId) {
-        // Editar Existente
         const g = allMasterGroups.find(x => x.id === groupId);
         if (g) setEditingGroup(JSON.parse(JSON.stringify(g)));
     } else {
-        // Criar Novo
         setEditingGroup({ title: "", required: false, maxSelection: 1, options: [] });
     }
     setIsModalOpen(true);
@@ -82,7 +93,6 @@ export default function EditProductPage({ params }: EditPageProps) {
   const handleSaveModal = async () => {
     if (!editingGroup.title) return alert("Título obrigatório");
     
-    // Converte para o tipo correto
     const payload = {
         title: editingGroup.title,
         required: editingGroup.required || false,
@@ -94,13 +104,11 @@ export default function EditProductPage({ params }: EditPageProps) {
         let savedId = editingGroup.id;
         if (savedId) {
             await updateGroup(savedId, payload);
-            // Atualiza lista local
             setAllMasterGroups(prev => prev.map(g => g.id === savedId ? { ...payload, id: savedId! } : g));
         } else {
             savedId = await createGroup(payload);
             const newG = { ...payload, id: savedId };
             setAllMasterGroups(prev => [...prev, newG]);
-            // Já seleciona o novo grupo no produto
             setFormData(prev => ({ ...prev, complementGroupIds: [...prev.complementGroupIds, savedId!] }));
         }
         setIsModalOpen(false);
@@ -129,30 +137,54 @@ export default function EditProductPage({ params }: EditPageProps) {
      setEditingGroup(prev => ({ ...prev, options: opts }));
   };
 
-
   if (fetching) return <div className="p-10 text-center">Carregando...</div>;
 
   return (
     <div className="max-w-5xl mx-auto pb-20 pt-6 px-4">
-      {/* Header */}
       <div className="flex items-center gap-4 mb-6">
         <button type="button" onClick={() => router.back()} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft size={24} /></button>
         <h1 className="text-2xl font-bold">Editar Produto</h1>
       </div>
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
         {/* ESQUERDA */}
         <div className="lg:col-span-2 space-y-8">
             <section className="bg-white p-6 rounded border space-y-6">
-                <h2 className="font-bold border-b pb-2">Informações</h2>
+                <h2 className="font-bold border-b pb-2">Dados do Produto</h2>
                 <input required className="w-full p-3 border rounded" placeholder="Nome" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                
+                {/* PREÇOS DUPLOS */}
+                <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded border">
+                    <div>
+                        <label className="text-xs font-bold text-green-700 uppercase mb-1 block">R$ À Vista (Padrão)</label>
+                        <input type="number" step="0.01" required className="w-full p-3 border rounded border-green-200 focus:ring-green-500" placeholder="0.00" value={formData.basePrice} onChange={e => setFormData({...formData, basePrice: parseFloat(e.target.value)})} />
+                    </div>
+                    <div>
+                        <label className="text-xs font-bold text-purple-700 uppercase mb-1 block">R$ Mensalista</label>
+                        <input type="number" step="0.01" className="w-full p-3 border rounded border-purple-200 focus:ring-purple-500" placeholder="Igual se vazio" value={formData.pricePostpaid || ''} onChange={e => setFormData({...formData, pricePostpaid: parseFloat(e.target.value)})} />
+                    </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
-                    <input type="number" step="0.01" required className="w-full p-3 border rounded" placeholder="Preço" value={formData.basePrice} onChange={e => setFormData({...formData, basePrice: parseFloat(e.target.value)})} />
                     <select className="w-full p-3 border rounded bg-white" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}><option value="bolos">Bolos</option><option value="doces">Doces</option><option value="salgados">Salgados</option><option value="bebidas">Bebidas</option></select>
                 </div>
                 <textarea rows={3} className="w-full p-3 border rounded" placeholder="Descrição" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
                 
+                {/* VISIBILIDADE */}
+                <div className="bg-white border p-4 rounded flex flex-col gap-2">
+                    <span className="text-sm font-bold flex items-center gap-2 text-gray-700"><Eye size={16}/> Quem pode ver este produto?</span>
+                    <div className="flex gap-6">
+                        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                            <input type="checkbox" className="w-4 h-4 text-green-600 rounded" checked={formData.availableStandard} onChange={e => setFormData({...formData, availableStandard: e.target.checked})} />
+                            Cliente Padrão
+                        </label>
+                        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                            <input type="checkbox" className="w-4 h-4 text-purple-600 rounded" checked={formData.availablePostpaid} onChange={e => setFormData({...formData, availablePostpaid: e.target.checked})} />
+                            Mensalista
+                        </label>
+                    </div>
+                </div>
+
                 <div className="bg-gray-50 p-4 rounded border flex items-center justify-between">
                     <label className="flex items-center gap-2 text-sm font-bold"><Box size={16}/> Controlar Estoque?</label>
                     <div className="flex items-center gap-4">
@@ -189,8 +221,6 @@ export default function EditProductPage({ params }: EditPageProps) {
                                     <h3 className="font-bold text-sm">{group.title}</h3>
                                     <p className="text-xs text-gray-500">{group.options.length} opções</p>
                                 </div>
-                                
-                                {/* AQUI ESTÁ A MUDANÇA: Abre o Modal em vez de Link */}
                                 <button type="button" onClick={() => handleOpenModal(group.id)} className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Editar Itens">
                                     <Pencil size={14} />
                                 </button>
@@ -220,7 +250,7 @@ export default function EditProductPage({ params }: EditPageProps) {
         </div>
       </form>
 
-      {/* === MODAL DE EDIÇÃO DE GRUPO (EMBUTIDO NA PÁGINA) === */}
+      {/* === MODAL DE EDIÇÃO DE GRUPO === */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in">
             <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-xl shadow-2xl flex flex-col">
@@ -256,7 +286,16 @@ export default function EditProductPage({ params }: EditPageProps) {
                                             <input disabled={isLinked} placeholder="Nome" className="w-full p-1 bg-transparent border-b border-dashed outline-none" value={opt.name} onChange={e => modalUpdateOpt(idx, 'name', e.target.value)} />
                                             {isLinked && <span className="text-[10px] text-blue-600 font-bold">🔗 Vinculado</span>}
                                         </div>
-                                        <input type="number" className="w-20 p-1 border rounded text-right" value={opt.priceAdd} onChange={e => modalUpdateOpt(idx, 'priceAdd', parseFloat(e.target.value))} />
+                                        {/* PREÇOS DUPLOS NO MODAL */}
+                                        <div className="flex flex-col w-20">
+                                            <label className="text-[8px] text-green-600 font-bold">Vista</label>
+                                            <input type="number" className="w-full p-1 border rounded text-right text-xs" value={opt.priceAdd} onChange={e => modalUpdateOpt(idx, 'priceAdd', parseFloat(e.target.value))} />
+                                        </div>
+                                        <div className="flex flex-col w-20">
+                                            <label className="text-[8px] text-purple-600 font-bold">Prazo</label>
+                                            <input type="number" className="w-full p-1 border rounded text-right text-xs" value={opt.priceAddPostpaid ?? opt.priceAdd} onChange={e => modalUpdateOpt(idx, 'priceAddPostpaid', parseFloat(e.target.value))} />
+                                        </div>
+
                                         {!isLinked && <input type="number" placeholder="∞" className="w-16 p-1 border rounded text-center" value={opt.stock ?? ''} onChange={e => modalUpdateOpt(idx, 'stock', e.target.value ? parseInt(e.target.value) : null)} />}
                                         <button onClick={() => modalRemoveOpt(idx)} className="text-red-500 p-1"><Trash2 size={16}/></button>
                                     </div>

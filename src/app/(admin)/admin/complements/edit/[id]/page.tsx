@@ -3,7 +3,7 @@
 
 import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Save, Trash2, Plus, Box, Info } from "lucide-react";
+import { ArrowLeft, Save, Trash2, Plus, Info } from "lucide-react";
 import { getGroupById, updateGroup } from "@/services/complementService";
 import { getProducts } from "@/services/productService";
 import { ComplementGroup, Option, Product } from "@/types";
@@ -31,8 +31,6 @@ export default function EditGroupPage({ params }: { params: Promise<{ id: string
     setLoading(true);
     try {
         await updateGroup(id, group);
-        // REDIRECIONAMENTO CORRIGIDO:
-        // Tenta voltar para a página anterior, se não der, vai pro Admin
         if (window.history.length > 1) {
             router.back();
         } else {
@@ -45,7 +43,6 @@ export default function EditGroupPage({ params }: { params: Promise<{ id: string
     }
   };
 
-  // Funções de manipulação (iguais ao modal)
   const addOption = (type: 'simple' | 'product', linkedId?: string) => {
     if(!group) return;
     let newOpt: Option = { id: crypto.randomUUID(), name: "", priceAdd: 0, isAvailable: true, stock: null };
@@ -74,7 +71,6 @@ export default function EditGroupPage({ params }: { params: Promise<{ id: string
 
   return (
     <div className="max-w-3xl mx-auto p-6 pb-20">
-        {/* BOTÃO VOLTAR ADICIONADO */}
         <div className="flex items-center gap-4 mb-6">
             <button onClick={() => router.back()} className="p-2 hover:bg-gray-100 rounded-full text-gray-600 transition">
                 <ArrowLeft size={24}/>
@@ -113,11 +109,19 @@ export default function EditGroupPage({ params }: { params: Promise<{ id: string
                                 <input disabled={isLinked} placeholder="Nome" className="w-full p-1 bg-transparent border-b border-dashed outline-none" value={opt.name} onChange={e => updateOpt(idx, 'name', e.target.value)} />
                                 {isLinked && <span className="text-[10px] text-blue-600 font-bold">🔗 Vinculado</span>}
                             </div>
+                            
+                            {/* PREÇOS DUPLOS */}
                             <div className="w-24">
-                                <input type="number" className="w-full p-1 border rounded text-right" value={opt.priceAdd} onChange={e => updateOpt(idx, 'priceAdd', parseFloat(e.target.value))} />
+                                <label className="text-[9px] text-green-600 font-bold block">Vista</label>
+                                <input type="number" className="w-full p-1 border rounded text-right text-sm" value={opt.priceAdd} onChange={e => updateOpt(idx, 'priceAdd', parseFloat(e.target.value))} />
                             </div>
-                            {!isLinked && <div className="w-16"><input type="number" placeholder="∞" className="w-full p-1 border rounded text-center" value={opt.stock ?? ''} onChange={e => updateOpt(idx, 'stock', e.target.value ? parseInt(e.target.value) : null)} /></div>}
-                            <button type="button" onClick={() => removeOption(idx)} className="text-gray-400 hover:text-red-500"><Trash2 size={18}/></button>
+                            <div className="w-24">
+                                <label className="text-[9px] text-purple-600 font-bold block">Prazo</label>
+                                <input type="number" className="w-full p-1 border rounded text-right text-sm" value={opt.priceAddPostpaid ?? opt.priceAdd} onChange={e => updateOpt(idx, 'priceAddPostpaid', parseFloat(e.target.value))} />
+                            </div>
+
+                            {!isLinked && <div className="w-16"><label className="text-[9px] text-gray-400 font-bold block">Qtd</label><input type="number" placeholder="∞" className="w-full p-1 border rounded text-center text-sm" value={opt.stock ?? ''} onChange={e => updateOpt(idx, 'stock', e.target.value ? parseInt(e.target.value) : null)} /></div>}
+                            <button type="button" onClick={() => removeOption(idx)} className="text-gray-400 hover:text-red-500 mt-3"><Trash2 size={18}/></button>
                         </div>
                     );
                 })}

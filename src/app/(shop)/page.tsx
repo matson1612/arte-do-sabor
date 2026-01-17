@@ -5,84 +5,61 @@ import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { useCart } from "@/context/CartContext";
+import { useAuth } from "@/context/AuthContext";
 import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X, CheckSquare, MessageSquare } from "lucide-react";
-
-// --- TIPOS (IGUAIS AO ADMIN) ---
-interface Option {
-  id: string;
-  name: string;
-  priceAdd: number;
-}
-
-interface ComplementGroup {
-  id: string;
-  title: string;
-  required: boolean;
-  maxSelection: number;
-  options: Option[];
-}
-
-interface Product {
-  id: string;
-  name: string;
-  description: string;
-  basePrice: number; // Admin salva como basePrice
-  price: number;     // Vamos usar esse pro front
-  imageUrl?: string;
-  category: string;
-  complementGroupIds?: string[]; // IDs salvos no produto
-  fullGroups?: ComplementGroup[]; // Grupos completos carregados
-}
+import { Product, ComplementGroup, Option } from "@/types";
 
 export default function ShopHome() {
   const { addToCart } = useCart();
+  const { profile } = useAuth();
+  
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Estado do Modal
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [observation, setObservation] = useState("");
-  
-  // Seleção de Complementos: Mapa { "ID_DO_GRUPO": [Opções Selecionadas] }
   const [selectedOptions, setSelectedOptions] = useState<Record<string, Option[]>>({});
 
-  // --- BUSCA DADOS ---
+  const getPrice = (item: Product) => {
+    if (profile?.clientType === 'monthly' && item.pricePostpaid && item.pricePostpaid > 0) {
+        return item.pricePostpaid;
+    }
+    return item.basePrice || 0;
+  };
+
+  const getOptionPrice = (opt: Option) => {
+      if (profile?.clientType === 'monthly' && opt.priceAddPostpaid !== undefined) {
+          return opt.priceAddPostpaid;
+      }
+      return opt.priceAdd;
+  };
+
   useEffect(() => {
     const fetchData = async () => {
       try {
-        console.log("--- CARREGANDO CARDÁPIO ---");
-        
-        // 1. Busca Produtos e Grupos em paralelo
         const [productsSnap, groupsSnap] = await Promise.all([
             getDocs(query(collection(db, "products"), orderBy("name"))),
-            getDocs(collection(db, "complement_groups")) // Nome padrão da coleção
+            getDocs(collection(db, "complement_groups"))
         ]);
 
-        // 2. Mapeia Grupos para facilitar acesso
         const groupsMap: Record<string, ComplementGroup> = {};
         groupsSnap.docs.forEach(doc => {
             groupsMap[doc.id] = { id: doc.id, ...doc.data() } as ComplementGroup;
         });
 
-        // 3. Monta Produtos Cruzando Dados
         const items = productsSnap.docs.map((doc) => {
           const data = doc.data();
-          
-          // Correção de Preço (Lê basePrice ou price)
-          const finalPrice = Number(data.basePrice) || Number(data.price) || 0;
-
-          // Cruza os IDs com os Grupos Reais
           const groupIds = data.complementGroupIds || [];
           const loadedGroups = groupIds.map((id: string) => groupsMap[id]).filter(Boolean);
 
+          // CORREÇÃO DO ERRO DE TIPO AQUI:
+          // Usamos 'as unknown as Product' para forçar a tipagem dos dados vindos do banco
           return { 
               id: doc.id, 
               ...data, 
-              price: finalPrice, 
-              basePrice: finalPrice,
               fullGroups: loadedGroups 
-          } as Product;
+          } as unknown as Product;
         });
 
         setProducts(items);
@@ -95,14 +72,21 @@ export default function ShopHome() {
     fetchData();
   }, []);
 
-  const groupedProducts = products.reduce((acc, product) => {
+  const visibleProducts = products.filter(p => {
+      if (!p.isAvailable) return false;
+      if (profile?.clientType === 'monthly') {
+          return p.availablePostpaid !== false;
+      }
+      return p.availableStandard !== false;
+  });
+
+  const groupedProducts = visibleProducts.reduce((acc, product) => {
     const cat = product.category || "Geral";
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(product);
     return acc;
   }, {} as Record<string, Product[]>);
 
-  // --- CONTROLES DO MODAL ---
   const openModal = (product: Product) => {
     setSelectedProduct(product);
     setQuantity(1);
@@ -117,51 +101,38 @@ export default function ShopHome() {
     let newSelection = [];
 
     if (isAlreadySelected) {
-        // Remover
         newSelection = currentSelected.filter(o => o.id !== option.id);
     } else {
-        // Adicionar (Verifica Máximo)
         if (group.maxSelection === 1) {
-            // Se for apenas 1, troca direto (tipo Radio Button)
             newSelection = [option];
         } else {
-            // Se permitir vários, verifica limite
             if (currentSelected.length >= group.maxSelection) {
-                alert(`Máximo de ${group.maxSelection} opções neste grupo.`);
-                return;
+                return alert(`Máximo de ${group.maxSelection} opções neste grupo.`);
             }
             newSelection = [...currentSelected, option];
         }
     }
-
     setSelectedOptions({ ...selectedOptions, [group.id]: newSelection });
   };
 
   const calculateTotal = () => {
     if (!selectedProduct) return 0;
-    
-    // Soma preço base
-    let total = selectedProduct.price;
-
-    // Soma todas as opções selecionadas de todos os grupos
+    let total = getPrice(selectedProduct);
     Object.values(selectedOptions).flat().forEach(opt => {
-        total += (opt.priceAdd || 0);
+        total += getOptionPrice(opt);
     });
-
     return total * quantity;
   };
 
   const handleAddToCart = () => {
     if (!selectedProduct) return;
 
-    // Verifica Obrigatórios
     const missingRequired = selectedProduct.fullGroups?.find(g => g.required && (!selectedOptions[g.id] || selectedOptions[g.id].length === 0));
     if (missingRequired) {
         alert(`O grupo "${missingRequired.title}" é obrigatório.`);
         return;
     }
 
-    // Monta nome detalhado
     let customName = selectedProduct.name;
     const allSelectedOpts = Object.values(selectedOptions).flat();
     
@@ -187,16 +158,17 @@ export default function ShopHome() {
 
   return (
     <div className="space-y-8 pb-24">
-      {/* Banner */}
       <div className="bg-gradient-to-r from-pink-600 to-rose-500 rounded-2xl p-6 text-white shadow-lg">
         <h2 className="text-2xl font-bold mb-1">Cardápio 🍔</h2>
-        <p className="opacity-90 text-sm">Escolha suas delícias abaixo.</p>
+        <p className="opacity-90 text-sm">
+            {profile?.clientType === 'monthly' ? "Modo Mensalista Ativo" : "Escolha suas delícias abaixo."}
+        </p>
       </div>
 
-      {products.length === 0 ? (
+      {visibleProducts.length === 0 ? (
         <div className="text-center text-gray-400 py-10">
           <ShoppingBag size={48} className="mx-auto mb-2 opacity-20"/>
-          <p>Nenhum produto cadastrado.</p>
+          <p>Nenhum produto cadastrado para seu perfil.</p>
         </div>
       ) : (
         Object.entries(groupedProducts).map(([category, items]) => (
@@ -225,7 +197,7 @@ export default function ShopHome() {
                     </div>
                     <div className="flex justify-between items-end">
                       <span className="font-bold text-green-600 text-sm">
-                        {product.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        {getPrice(product).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                       </span>
                       <button className="bg-pink-50 text-pink-600 p-1.5 rounded-full hover:bg-pink-600 hover:text-white transition-colors">
                         <Plus size={16} />
@@ -239,15 +211,21 @@ export default function ShopHome() {
         ))
       )}
 
-      {/* --- MODAL DE DETALHES --- */}
       {selectedProduct && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4 animate-in fade-in duration-200 backdrop-blur-sm">
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
+
             <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-10 z-10 max-h-[90vh] overflow-y-auto">
-                <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-black/20 text-white p-1 rounded-full hover:bg-black/40"><X size={20}/></button>
-                
+                <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-black/20 text-white p-1 rounded-full hover:bg-black/40 backdrop-blur-md">
+                    <X size={20}/>
+                </button>
+
                 <div className="h-48 bg-gray-100 relative">
-                    {selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-400"><ImageOff size={40}/></div>}
+                    {selectedProduct.imageUrl ? (
+                         <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" />
+                    ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-400"><ImageOff size={40}/></div>
+                    )}
                 </div>
 
                 <div className="p-6 space-y-6">
@@ -255,13 +233,13 @@ export default function ShopHome() {
                         <div className="flex justify-between items-start mb-1">
                             <h2 className="text-xl font-bold text-gray-800">{selectedProduct.name}</h2>
                             <div className="text-xl font-bold text-green-600">
-                                {selectedProduct.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                {getPrice(selectedProduct).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                             </div>
                         </div>
                         <p className="text-sm text-gray-500 leading-relaxed">{selectedProduct.description}</p>
                     </div>
 
-                    {/* GRUPOS DE COMPLEMENTOS */}
+                    {/* COMPLEMENTOS */}
                     {selectedProduct.fullGroups && selectedProduct.fullGroups.length > 0 && (
                         <div className="space-y-4">
                             {selectedProduct.fullGroups.map(group => (
@@ -276,6 +254,8 @@ export default function ShopHome() {
                                     <div className="space-y-2">
                                         {group.options.map(opt => {
                                             const isSelected = selectedOptions[group.id]?.some(o => o.id === opt.id);
+                                            const optPrice = getOptionPrice(opt);
+                                            
                                             return (
                                                 <div key={opt.id} onClick={() => toggleOption(group, opt)} className={`flex justify-between items-center p-2 rounded border cursor-pointer bg-white transition-all ${isSelected ? 'border-pink-500 ring-1 ring-pink-500' : 'border-gray-200 hover:border-pink-300'}`}>
                                                     <div className="flex items-center gap-2">
@@ -284,7 +264,7 @@ export default function ShopHome() {
                                                         </div>
                                                         <span className="text-sm text-gray-700">{opt.name}</span>
                                                     </div>
-                                                    {opt.priceAdd > 0 && <span className="text-xs font-bold text-green-600">+ R$ {opt.priceAdd.toFixed(2)}</span>}
+                                                    {optPrice > 0 && <span className="text-xs font-bold text-green-600">+ R$ {optPrice.toFixed(2)}</span>}
                                                 </div>
                                             )
                                         })}
