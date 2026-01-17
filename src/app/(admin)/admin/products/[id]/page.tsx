@@ -1,14 +1,14 @@
 // src/app/(admin)/admin/products/[id]/page.tsx
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, use, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-// ADICIONEI X e Trash2 AQUI EMBAIXO:
-import { ArrowLeft, Upload, Box, Layers, Pencil, Eye, X, Trash2 } from "lucide-react";
+import { ArrowLeft, Save, Upload, Box, Layers, Pencil, Eye, X, Trash2, Loader2 } from "lucide-react";
 import { Product, ComplementGroup, Option } from "@/types";
 import { getProductById, updateProduct, getProducts } from "@/services/productService";
 import { getAllGroups, createGroup, updateGroup } from "@/services/complementService";
+import { uploadImage } from "@/services/uploadService"; // ImgBB
 
 interface EditPageProps { params: Promise<{ id: string }>; }
 
@@ -17,19 +17,21 @@ export default function EditProductPage({ params }: EditPageProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
+  
+  // Estados Upload
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [allMasterGroups, setAllMasterGroups] = useState<ComplementGroup[]>([]);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   
   const [manageStock, setManageStock] = useState(false);
   
-  // Estado Completo do Produto
   const [formData, setFormData] = useState<Product>({
     id: "", name: "", description: "", 
     basePrice: 0, pricePostpaid: 0, 
     imageUrl: "", category: "bolos", 
-    isAvailable: true, 
-    availableStandard: true, availablePostpaid: true,
+    isAvailable: true, availableStandard: true, availablePostpaid: true,
     stock: null, complementGroupIds: []
   });
 
@@ -53,7 +55,6 @@ export default function EditProductPage({ params }: EditPageProps) {
                 name: p.name || "", 
                 description: p.description || "", 
                 complementGroupIds: p.complementGroupIds || [],
-                // Garante valores padrão se novos campos não existirem
                 availableStandard: p.availableStandard !== false, 
                 availablePostpaid: p.availablePostpaid !== false,
                 pricePostpaid: p.pricePostpaid || 0
@@ -67,6 +68,25 @@ export default function EditProductPage({ params }: EditPageProps) {
     init();
   }, [id]);
 
+  // --- LÓGICA DE UPLOAD (ImgBB) ---
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) return alert("Apenas imagens.");
+    if (file.size > 10 * 1024 * 1024) return alert("Máx 10MB.");
+
+    try {
+        setUploading(true);
+        const url = await uploadImage(file);
+        setFormData(prev => ({ ...prev, imageUrl: url }));
+    } catch (error) {
+        alert("Erro no upload. Verifique a API Key no arquivo uploadService.");
+    } finally {
+        setUploading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -79,7 +99,7 @@ export default function EditProductPage({ params }: EditPageProps) {
     finally { setLoading(false); }
   };
 
-  // --- MODAL LÓGICA ---
+  // --- MODAL (Mantido igual) ---
   const handleOpenModal = (groupId?: string) => {
     if (groupId) {
         const g = allMasterGroups.find(x => x.id === groupId);
@@ -92,14 +112,12 @@ export default function EditProductPage({ params }: EditPageProps) {
 
   const handleSaveModal = async () => {
     if (!editingGroup.title) return alert("Título obrigatório");
-    
     const payload = {
         title: editingGroup.title,
         required: editingGroup.required || false,
         maxSelection: Number(editingGroup.maxSelection) || 1,
         options: editingGroup.options || []
     };
-
     try {
         let savedId = editingGroup.id;
         if (savedId) {
@@ -115,7 +133,6 @@ export default function EditProductPage({ params }: EditPageProps) {
     } catch (e) { alert("Erro ao salvar grupo."); }
   };
 
-  // Helpers do Modal
   const modalAddOption = (type: 'simple' | 'product', linkedId?: string) => {
     let newOpt: Option = { id: crypto.randomUUID(), name: "", priceAdd: 0, isAvailable: true, stock: null };
     if (type === 'product' && linkedId) {
@@ -153,15 +170,14 @@ export default function EditProductPage({ params }: EditPageProps) {
                 <h2 className="font-bold border-b pb-2">Dados do Produto</h2>
                 <input required className="w-full p-3 border rounded" placeholder="Nome" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
                 
-                {/* PREÇOS DUPLOS */}
                 <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded border">
                     <div>
                         <label className="text-xs font-bold text-green-700 uppercase mb-1 block">R$ À Vista (Padrão)</label>
-                        <input type="number" step="0.01" required className="w-full p-3 border rounded border-green-200 focus:ring-green-500" placeholder="0.00" value={formData.basePrice} onChange={e => setFormData({...formData, basePrice: parseFloat(e.target.value)})} />
+                        <input type="number" step="0.01" required className="w-full p-3 border rounded border-green-200" value={formData.basePrice} onChange={e => setFormData({...formData, basePrice: parseFloat(e.target.value)})} />
                     </div>
                     <div>
                         <label className="text-xs font-bold text-purple-700 uppercase mb-1 block">R$ Mensalista</label>
-                        <input type="number" step="0.01" className="w-full p-3 border rounded border-purple-200 focus:ring-purple-500" placeholder="Igual se vazio" value={formData.pricePostpaid || ''} onChange={e => setFormData({...formData, pricePostpaid: parseFloat(e.target.value)})} />
+                        <input type="number" step="0.01" className="w-full p-3 border rounded border-purple-200" placeholder="Igual se vazio" value={formData.pricePostpaid || ''} onChange={e => setFormData({...formData, pricePostpaid: parseFloat(e.target.value)})} />
                     </div>
                 </div>
 
@@ -170,18 +186,11 @@ export default function EditProductPage({ params }: EditPageProps) {
                 </div>
                 <textarea rows={3} className="w-full p-3 border rounded" placeholder="Descrição" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
                 
-                {/* VISIBILIDADE */}
                 <div className="bg-white border p-4 rounded flex flex-col gap-2">
                     <span className="text-sm font-bold flex items-center gap-2 text-gray-700"><Eye size={16}/> Quem pode ver este produto?</span>
                     <div className="flex gap-6">
-                        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-                            <input type="checkbox" className="w-4 h-4 text-green-600 rounded" checked={formData.availableStandard} onChange={e => setFormData({...formData, availableStandard: e.target.checked})} />
-                            Cliente Padrão
-                        </label>
-                        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-                            <input type="checkbox" className="w-4 h-4 text-purple-600 rounded" checked={formData.availablePostpaid} onChange={e => setFormData({...formData, availablePostpaid: e.target.checked})} />
-                            Mensalista
-                        </label>
+                        <label className="flex items-center gap-2 text-sm cursor-pointer select-none"><input type="checkbox" className="w-4 h-4 text-green-600 rounded" checked={formData.availableStandard} onChange={e => setFormData({...formData, availableStandard: e.target.checked})} /> Padrão</label>
+                        <label className="flex items-center gap-2 text-sm cursor-pointer select-none"><input type="checkbox" className="w-4 h-4 text-purple-600 rounded" checked={formData.availablePostpaid} onChange={e => setFormData({...formData, availablePostpaid: e.target.checked})} /> Mensalista</label>
                     </div>
                 </div>
 
@@ -200,7 +209,6 @@ export default function EditProductPage({ params }: EditPageProps) {
                     <h2 className="font-bold flex items-center gap-2"><Layers size={18} /> Complementos</h2>
                     <button type="button" onClick={() => handleOpenModal()} className="text-sm text-pink-600 font-bold hover:underline">+ Criar Novo Grupo</button>
                 </div>
-
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {allMasterGroups.map((group) => {
                         const isSelected = formData.complementGroupIds?.includes(group.id);
@@ -221,9 +229,7 @@ export default function EditProductPage({ params }: EditPageProps) {
                                     <h3 className="font-bold text-sm">{group.title}</h3>
                                     <p className="text-xs text-gray-500">{group.options.length} opções</p>
                                 </div>
-                                <button type="button" onClick={() => handleOpenModal(group.id)} className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Editar Itens">
-                                    <Pencil size={14} />
-                                </button>
+                                <button type="button" onClick={() => handleOpenModal(group.id)} className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Editar Itens"><Pencil size={14} /></button>
                             </div>
                         );
                     })}
@@ -231,26 +237,38 @@ export default function EditProductPage({ params }: EditPageProps) {
             </section>
         </div>
 
-        {/* DIREITA */}
+        {/* DIREITA - UPLOAD DE IMAGEM */}
         <div className="space-y-6">
             <div className="bg-white p-6 rounded border sticky top-6">
                 <label className="block text-sm font-medium mb-3">Foto</label>
-                <div className="aspect-square bg-gray-100 rounded border flex items-center justify-center overflow-hidden mb-4">
-                    {formData.imageUrl ? <img src={formData.imageUrl} className="w-full h-full object-cover" onError={e => (e.target as any).style.display='none'}/> : <Upload className="text-gray-400"/>}
+                <div 
+                    className="aspect-square bg-gray-100 rounded border flex items-center justify-center overflow-hidden mb-4 cursor-pointer relative group"
+                    onClick={() => fileInputRef.current?.click()}
+                >
+                    {uploading ? <div className="flex flex-col items-center text-pink-600"><Loader2 className="animate-spin mb-2"/> Enviando...</div> : 
+                     formData.imageUrl ? <><img src={formData.imageUrl} className="w-full h-full object-cover" onError={e => (e.target as any).style.display='none'}/><div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white font-bold transition">Trocar Foto</div></> : 
+                     <div className="flex flex-col items-center text-gray-400"><Upload size={32}/><span className="text-xs mt-2">Clique para enviar</span></div>
+                    }
                 </div>
-                <input type="url" className="w-full p-2 text-sm border rounded mb-4" placeholder="URL da Imagem" value={formData.imageUrl} onChange={e => setFormData({...formData, imageUrl: e.target.value})} />
+                
+                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
+                
+                <div className="relative mb-4">
+                    <span className="text-[10px] bg-white px-1 absolute -top-2 left-2 text-gray-400 uppercase font-bold">Ou URL</span>
+                    <input type="url" className="w-full p-2 border rounded text-xs" placeholder="https://..." value={formData.imageUrl} onChange={e => setFormData({...formData, imageUrl: e.target.value})} />
+                </div>
                 
                 <div className="flex justify-between items-center mb-6 bg-gray-50 p-3 rounded">
                     <span className="text-sm font-medium">Disponível?</span>
                     <button type="button" onClick={() => setFormData({...formData, isAvailable: !formData.isAvailable})} className={`w-12 h-6 rounded-full relative transition ${formData.isAvailable ? 'bg-green-500' : 'bg-gray-300'}`}><div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${formData.isAvailable ? 'left-7' : 'left-1'}`} /></button>
                 </div>
                 
-                <button type="submit" disabled={loading} className="w-full bg-slate-900 text-white font-bold py-3 rounded hover:bg-slate-800">{loading ? "Salvando..." : "Salvar Tudo"}</button>
+                <button type="submit" disabled={loading || uploading} className="w-full bg-slate-900 text-white font-bold py-3 rounded hover:bg-slate-800">{loading ? "Salvando..." : "Salvar Tudo"}</button>
             </div>
         </div>
       </form>
 
-      {/* === MODAL DE EDIÇÃO DE GRUPO === */}
+      {/* MODAL DE EDIÇÃO DE GRUPO */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in">
             <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-xl shadow-2xl flex flex-col">
@@ -286,16 +304,8 @@ export default function EditProductPage({ params }: EditPageProps) {
                                             <input disabled={isLinked} placeholder="Nome" className="w-full p-1 bg-transparent border-b border-dashed outline-none" value={opt.name} onChange={e => modalUpdateOpt(idx, 'name', e.target.value)} />
                                             {isLinked && <span className="text-[10px] text-blue-600 font-bold">🔗 Vinculado</span>}
                                         </div>
-                                        {/* PREÇOS DUPLOS NO MODAL */}
-                                        <div className="flex flex-col w-20">
-                                            <label className="text-[8px] text-green-600 font-bold">Vista</label>
-                                            <input type="number" className="w-full p-1 border rounded text-right text-xs" value={opt.priceAdd} onChange={e => modalUpdateOpt(idx, 'priceAdd', parseFloat(e.target.value))} />
-                                        </div>
-                                        <div className="flex flex-col w-20">
-                                            <label className="text-[8px] text-purple-600 font-bold">Prazo</label>
-                                            <input type="number" className="w-full p-1 border rounded text-right text-xs" value={opt.priceAddPostpaid ?? opt.priceAdd} onChange={e => modalUpdateOpt(idx, 'priceAddPostpaid', parseFloat(e.target.value))} />
-                                        </div>
-
+                                        <div className="w-20"><input type="number" className="w-full p-1 border rounded text-right text-xs" value={opt.priceAdd} onChange={e => modalUpdateOpt(idx, 'priceAdd', parseFloat(e.target.value))} /></div>
+                                        <div className="w-20"><input type="number" className="w-full p-1 border rounded text-right text-xs" value={opt.priceAddPostpaid ?? opt.priceAdd} onChange={e => modalUpdateOpt(idx, 'priceAddPostpaid', parseFloat(e.target.value))} /></div>
                                         {!isLinked && <input type="number" placeholder="∞" className="w-16 p-1 border rounded text-center" value={opt.stock ?? ''} onChange={e => modalUpdateOpt(idx, 'stock', e.target.value ? parseInt(e.target.value) : null)} />}
                                         <button onClick={() => modalRemoveOpt(idx)} className="text-red-500 p-1"><Trash2 size={16}/></button>
                                     </div>

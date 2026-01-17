@@ -16,16 +16,14 @@ const firebaseConfig = {
 // Inicializa o App
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// Configuração do Firestore (mantive sua config de LongPolling para evitar travamentos)
+// Configuração do Firestore
 const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
 });
 
 // Auth
 const auth = getAuth(app);
-
-// AQUI ESTAVA A DIFERENÇA: Mudamos de 'googleProvider' para 'provider'
 const provider = new GoogleAuthProvider();
 
-// Agora exportamos como 'provider' para o AuthContext encontrar
+// Note que removemos o 'storage' daqui pois usaremos ImgBB
 export { db, auth, provider };
