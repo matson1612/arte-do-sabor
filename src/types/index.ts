@@ -2,17 +2,17 @@
 
 export type ClientType = 'standard' | 'monthly';
 
-// Correção do erro "Module has no exported member OrderStatus"
+// Atualizado com todos os status que você usa
 export type OrderStatus = 'em_aberto' | 'produzindo' | 'entrega' | 'finalizado' | 'cancelado';
 
 export interface Option {
   id: string;
   name: string;
   priceAdd: number;
-  priceAddPostpaid?: number; // Preço a prazo
+  priceAddPostpaid?: number; 
   isAvailable: boolean;
   stock: number | null;
-  linkedProductId?: string;
+  linkedProductId?: string; 
 }
 
 export interface ComplementGroup {
@@ -28,15 +28,12 @@ export interface Product {
   name: string;
   description: string;
   basePrice: number;
-  pricePostpaid?: number; // Preço a prazo
+  pricePostpaid?: number;
   imageUrl: string;
   category: string;
-  
-  // Disponibilidade
   isAvailable: boolean;
   availableStandard?: boolean;
   availablePostpaid?: boolean;
-
   stock: number | null;
   complementGroupIds: string[];
   
@@ -57,32 +54,33 @@ export interface UserProfile {
   name: string;
   email: string;
   photoURL?: string;
-  clientType?: ClientType; // 'standard' ou 'monthly'
+  clientType?: ClientType; 
   createdAt: any;
   phone?: string;
   address?: any;
 }
 
-// Correção dos erros "Property does not exist on type Order"
+// --- CORREÇÃO AQUI ---
 export interface Order {
   id: string;
+  shortId?: string; // <--- O CAMPO QUE FALTAVA
   userId: string;
   userName: string;
   userPhone: string;
   items: string; // JSON string
   total: number;
-  status: OrderStatus; // Usa o tipo novo
+  status: OrderStatus;
   createdAt: any;
   
-  // Novos campos obrigatórios
+  // Campos obrigatórios para o Admin e Boleta
   paymentMethod: string;
   deliveryMethod: string;
-  shippingPrice: number;
+  shippingPrice?: number;
   address?: any;
 }
 
 export interface StoreSettings {
-  id?: string;
+  id?: string; 
   storeName: string;
   cnpj: string;
   phone: string;
