@@ -10,7 +10,7 @@ import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
 import { db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
 
-const PHONE_NUMBER = "5563999999999"; 
+const PHONE_NUMBER = "5563981221181"; 
 const GOOGLE_MAPS_API_KEY = "AIzaSyBy365txh8nJ9JuGfvyPGdW5-angEXWBj8"; 
 const DEFAULT_CENTER = { lat: -10.183760, lng: -48.333650 }; 
 
