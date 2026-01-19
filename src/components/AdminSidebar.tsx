@@ -6,14 +6,14 @@ import { usePathname } from "next/navigation";
 import { 
   LayoutDashboard, 
   ShoppingBag, 
-  Users, 
   UtensilsCrossed, 
+  Users, 
   Settings, 
-  LogOut, 
-  X,
-  Store
+  LogOut,
+  Store,
+  X
 } from "lucide-react";
-import { auth } from "@/lib/firebase";
+import { useAuth } from "@/context/AuthContext";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -22,26 +22,28 @@ interface SidebarProps {
 
 export default function AdminSidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const { logout } = useAuth();
 
-  const links = [
-    { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/admin/orders", label: "Pedidos", icon: ShoppingBag },
-    { href: "/admin", label: "Produtos", icon: UtensilsCrossed },
-    { href: "/admin/customers", label: "Clientes", icon: Users },
-    // { href: "/admin/settings", label: "Configurações", icon: Settings },
+  const menuItems = [
+    { name: "Dashboard", href: "/admin/dashboard", icon: LayoutDashboard },
+    { name: "Pedidos", href: "/admin/orders", icon: ShoppingBag },
+    { name: "Cardápio", href: "/admin", icon: UtensilsCrossed },
+    { name: "Clientes", href: "/admin/customers", icon: Users },
+    { name: "Loja & Frete", href: "/admin/settings", icon: Settings },
   ];
 
-  const isActive = (path: string) => pathname === path || pathname.startsWith(path + "/");
+  // Verifica se o link está ativo
+  const isActive = (href: string) => pathname === href || (href !== "/admin" && pathname.startsWith(href));
 
   return (
     <>
-      {/* Overlay Escuro (Só aparece no Mobile quando aberto) */}
+      {/* Overlay Escuro (Só aparece no celular quando aberto) */}
       <div 
         className={`fixed inset-0 bg-black/50 z-40 transition-opacity lg:hidden ${isOpen ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         onClick={onClose}
       />
 
-      {/* Sidebar */}
+      {/* Sidebar Principal */}
       <aside 
         className={`
           fixed top-0 left-0 z-50 h-full w-64 bg-slate-900 text-white shadow-xl transition-transform duration-300
@@ -52,9 +54,12 @@ export default function AdminSidebar({ isOpen, onClose }: SidebarProps) {
         <div className="flex flex-col h-full">
             {/* Cabeçalho */}
             <div className="p-6 border-b border-slate-800 flex justify-between items-center">
-                <div>
-                    <h1 className="font-bold text-xl tracking-tight">Admin</h1>
-                    <p className="text-xs text-slate-400">Arte do Sabor</p>
+                <div className="flex items-center gap-2">
+                    <Store className="text-pink-500" />
+                    <div>
+                        <h1 className="font-bold text-lg leading-tight">Painel Admin</h1>
+                        <p className="text-xs text-slate-400">Arte do Sabor</p>
+                    </div>
                 </div>
                 {/* Botão Fechar (Só Mobile) */}
                 <button onClick={onClose} className="lg:hidden text-slate-400 hover:text-white">
@@ -62,40 +67,41 @@ export default function AdminSidebar({ isOpen, onClose }: SidebarProps) {
                 </button>
             </div>
 
-            {/* Links */}
+            {/* Navegação */}
             <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-                {links.map((link) => {
-                    const Icon = link.icon;
-                    const active = isActive(link.href);
+                {menuItems.map((item) => {
+                    const Icon = item.icon;
+                    const active = isActive(item.href);
                     
                     return (
                         <Link 
-                            key={link.href} 
-                            href={link.href}
-                            onClick={onClose} // Fecha menu ao clicar (mobile)
+                            key={item.href} 
+                            href={item.href}
+                            onClick={onClose} // Fecha ao clicar no mobile
                             className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium ${
                                 active 
                                 ? "bg-pink-600 text-white shadow-lg shadow-pink-900/20" 
                                 : "text-slate-400 hover:bg-slate-800 hover:text-white"
                             }`}
                         >
-                            <Icon size={20}/>
-                            {link.label}
+                            <Icon size={20} />
+                            {item.name}
                         </Link>
                     )
                 })}
             </nav>
 
-            {/* Rodapé */}
-            <div className="p-4 border-t border-slate-800 space-y-2">
-                <Link href="/" className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white transition">
-                    <Store size={20}/> Ver Loja
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-800">
+                <Link href="/" className="flex items-center gap-3 w-full px-4 py-3 text-slate-400 hover:text-white mb-1 transition">
+                    <Store size={20}/> Ir para Loja
                 </Link>
                 <button 
-                    onClick={() => auth.signOut()} 
-                    className="w-full flex items-center gap-3 px-4 py-3 text-red-400 hover:bg-red-950/30 hover:text-red-300 rounded-xl transition"
+                    onClick={logout} 
+                    className="flex items-center gap-3 w-full px-4 py-3 text-red-400 hover:bg-red-950/30 rounded-xl transition-colors font-medium"
                 >
-                    <LogOut size={20}/> Sair
+                    <LogOut size={20} />
+                    Sair
                 </button>
             </div>
         </div>
