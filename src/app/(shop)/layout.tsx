@@ -3,20 +3,15 @@
 
 import { CartProvider } from "@/context/CartContext";
 import TopBar from "@/components/TopBar"; 
-import CustomerNav from "@/components/CustomerNav"; // <--- NOVO MENU
+import CustomerNav from "@/components/CustomerNav";
 
 export default function ShopLayout({ children }: { children: React.ReactNode }) {
   return (
     <CartProvider>
-      <div className="bg-gray-50 min-h-screen flex flex-col">
-        {/* Barra do Topo (Logo, Login, Carrinho) */}
+      <div className="bg-[#FFFBF7] min-h-screen flex flex-col font-sans text-stone-800">
         <TopBar />
-        
-        {/* Navegação entre Áreas (Delivery / Encomendas / Eventos) */}
         <CustomerNav />
-
-        {/* Conteúdo das páginas */}
-        <main className="container mx-auto px-4 py-6 flex-grow">
+        <main className="container mx-auto px-4 py-6 flex-grow max-w-5xl">
           {children}
         </main>
       </div>
