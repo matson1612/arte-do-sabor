@@ -3,30 +3,35 @@
 
 import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
-import { collection, query, orderBy, onSnapshot, doc, updateDoc, getDocs, increment, getDoc, runTransaction } from "firebase/firestore";
-import { Order, OrderStatus, Product } from "@/types";
-import { Loader2, Filter, Clock, Truck, CheckCircle, ChefHat, MessageCircle, DollarSign, Edit, X, Plus, Trash2, Save } from "lucide-react";
+import { collection, query, orderBy, onSnapshot, doc, updateDoc, getDocs, runTransaction } from "firebase/firestore";
+import { Order, OrderStatus, Product, CartItem, Option } from "@/types";
+import { Loader2, Filter, Clock, Truck, CheckCircle, ChefHat, MessageCircle, DollarSign, Edit, X, Trash2, Search, Calendar } from "lucide-react";
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [products, setProducts] = useState<Product[]>([]); // Para o modal de edição
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("todos");
+  
+  // Filtros
+  const [statusFilter, setStatusFilter] = useState("todos");
+  const [clientFilter, setClientFilter] = useState("");
+  const [productFilter, setProductFilter] = useState("");
+  const [dateFilter, setDateFilter] = useState("");
 
-  // Estados do Modal de Edição
+  // Edição
   const [isEditing, setIsEditing] = useState<Order | null>(null);
   const [editItems, setEditItems] = useState<any[]>([]);
   const [editTotal, setEditTotal] = useState(0);
 
   useEffect(() => {
-    // Carrega pedidos
+    // Carrega Pedidos
     const q = query(collection(db, "orders"), orderBy("createdAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
         setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() } as Order)));
         setLoading(false);
     });
 
-    // Carrega produtos (para o select de adicionar item)
+    // Carrega Produtos (para edição)
     getDocs(collection(db, "products")).then(snap => {
         setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Product)));
     });
@@ -34,231 +39,289 @@ export default function AdminOrdersPage() {
     return () => unsub();
   }, []);
 
-  // --- LÓGICA DE ESTOQUE E STATUS ---
-  const updateStatus = async (order: Order, newStatus: OrderStatus) => {
-    try {
-        const oldStatus = order.status;
-        
-        // Regra de Estoque: Baixar quando entra em produção
-        if (oldStatus === 'em_aberto' && newStatus === 'produzindo') {
-            await adjustStock(order, -1); // Remove do estoque
-        }
-        // Regra de Estoque: Devolver se cancelar (após ter baixado)
-        if (oldStatus !== 'em_aberto' && oldStatus !== 'cancelado' && newStatus === 'cancelado') {
-            await adjustStock(order, 1); // Devolve ao estoque
-        }
-
-        await updateDoc(doc(db, "orders", order.id), { status: newStatus });
-        notifyClient(order, newStatus);
-    } catch (e) {
-        console.error(e);
-        alert("Erro ao atualizar. Verifique se há estoque suficiente.");
-    }
-  };
-
+  // --- LÓGICA DE ESTOQUE COMPLETA (PRODUTO + COMPLEMENTOS) ---
   const adjustStock = async (order: Order, multiplier: number) => {
-      let items: any[] = [];
-      try { items = JSON.parse(order.items); } catch(e){}
+      let items: CartItem[] = [];
+      try { items = JSON.parse(order.items); } catch(e){ return; }
       
-      // Usa transaction para garantir integridade
       await runTransaction(db, async (transaction) => {
           for (const item of items) {
-              // Se tiver ID vinculado, atualiza o estoque desse produto
+              // 1. Baixa Produto Principal
               if (item.id) {
                   const productRef = doc(db, "products", item.id);
                   const productSnap = await transaction.get(productRef);
-                  if (productSnap.exists() && productSnap.data().stock !== null) {
-                      const newStock = (productSnap.data().stock || 0) + (item.quantity * multiplier);
-                      if (newStock < 0) throw new Error(`Estoque insuficiente para ${item.name}`);
-                      transaction.update(productRef, { stock: newStock });
+                  if (productSnap.exists()) {
+                      const data = productSnap.data();
+                      if (data.stock !== null) {
+                          const newStock = data.stock + (item.quantity * multiplier);
+                          transaction.update(productRef, { stock: newStock });
+                      }
+                  }
+              }
+
+              // 2. Baixa Complementos
+              if (item.selectedOptions) {
+                  for (const [groupId, opts] of Object.entries(item.selectedOptions)) {
+                      const groupRef = doc(db, "complement_groups", groupId);
+                      const groupSnap = await transaction.get(groupRef);
+                      
+                      if (groupSnap.exists()) {
+                          const groupData = groupSnap.data();
+                          let optionsList = groupData.options || [];
+                          let changed = false;
+
+                          // Percorre as opções escolhidas neste grupo
+                          (opts as Option[]).forEach(selectedOpt => {
+                              const idx = optionsList.findIndex((o: any) => o.id === selectedOpt.id);
+                              if (idx !== -1) {
+                                  const currentStock = optionsList[idx].stock;
+                                  if (currentStock !== null) {
+                                      // Multiplica pela qtd do item principal (ex: 2 lanches = 2 bacons)
+                                      optionsList[idx].stock = currentStock + (item.quantity * multiplier);
+                                      changed = true;
+                                  }
+                              }
+                          });
+
+                          if (changed) {
+                              transaction.update(groupRef, { options: optionsList });
+                          }
+                      }
                   }
               }
           }
       });
   };
 
+  const updateStatus = async (order: Order, newStatus: OrderStatus) => {
+    try {
+        const oldStatus = order.status;
+        
+        // Baixa estoque ao iniciar produção
+        if (oldStatus === 'em_aberto' && newStatus === 'produzindo') {
+            await adjustStock(order, -1);
+        }
+        // Devolve estoque ao cancelar (se já tiver baixado)
+        if (oldStatus !== 'em_aberto' && oldStatus !== 'cancelado' && newStatus === 'cancelado') {
+            await adjustStock(order, 1);
+        }
+
+        await updateDoc(doc(db, "orders", order.id), { status: newStatus });
+        notifyClient(order, newStatus);
+    } catch (e) {
+        console.error(e);
+        alert("Erro ao atualizar status/estoque.");
+    }
+  };
+
   const notifyClient = (order: Order, newStatus: string) => {
       if (!order.userPhone) return;
       const phone = order.userPhone.replace(/\D/g, '');
-      let msg = "";
       const orderId = order.shortId || order.id.slice(0,4);
+      let msg = "";
 
       switch(newStatus) {
-          case 'produzindo': msg = `👨‍🍳 Olá ${order.userName}, seu pedido #${orderId} começou a ser preparado!`; break;
-          case 'entrega': msg = `🛵 Saiu para entrega! Seu pedido #${orderId} está a caminho.`; break;
-          case 'finalizado': msg = `✅ Pedido #${orderId} finalizado. Obrigado!`; break;
-          case 'cancelado': msg = `❌ O pedido #${orderId} foi cancelado.`; break;
+          case 'produzindo': msg = `👨‍🍳 Pedido #${orderId}: Começamos a preparar!`; break;
+          case 'entrega': msg = `🛵 Pedido #${orderId}: Saiu para entrega!`; break;
+          case 'finalizado': msg = `✅ Pedido #${orderId}: Entregue com sucesso.`; break;
+          case 'cancelado': msg = `❌ Pedido #${orderId}: Foi cancelado.`; break;
       }
       if (msg) window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
-  // --- LÓGICA DE EDIÇÃO ---
-  const openEditModal = (order: Order) => {
-      setIsEditing(order);
-      try {
-          const items = JSON.parse(order.items);
-          setEditItems(items);
-          setEditTotal(order.total);
-      } catch(e) { setEditItems([]); }
+  // --- FILTROS ---
+  const filteredOrders = orders.filter(order => {
+      // 1. Filtro de Status
+      if (statusFilter !== "todos") {
+          if (statusFilter === "boleta_pendente") {
+              if (order.paymentMethod !== 'conta_aberta' || order.status === 'finalizado' || order.status === 'cancelado') return false;
+          } else if (order.status !== statusFilter) {
+              return false;
+          }
+      }
+      
+      // 2. Filtro de Cliente (Nome)
+      if (clientFilter && !order.userName.toLowerCase().includes(clientFilter.toLowerCase())) return false;
+
+      // 3. Filtro de Produto (Dentro dos itens JSON)
+      if (productFilter && !order.items.toLowerCase().includes(productFilter.toLowerCase())) return false;
+
+      // 4. Filtro de Data
+      if (dateFilter) {
+          const orderDate = new Date(order.createdAt?.seconds * 1000).toISOString().split('T')[0];
+          if (orderDate !== dateFilter) return false;
+      }
+
+      return true;
+  });
+
+  // Cores e Estilos Visuais Reforçados
+  const getStatusStyle = (status: string) => {
+      switch(status) {
+          case 'em_aberto': return 'border-l-yellow-500 bg-yellow-50';
+          case 'produzindo': return 'border-l-blue-600 bg-blue-50';
+          case 'entrega': return 'border-l-orange-500 bg-orange-50';
+          case 'finalizado': return 'border-l-green-600 bg-white opacity-70 grayscale-[0.5]';
+          case 'cancelado': return 'border-l-red-600 bg-red-50 opacity-60';
+          default: return 'border-l-gray-400 bg-white';
+      }
   };
 
-  const saveEdit = async () => {
-      if (!isEditing) return;
-      try {
-          await updateDoc(doc(db, "orders", isEditing.id), {
-              items: JSON.stringify(editItems),
-              total: editTotal
-          });
-          alert("Pedido atualizado!");
-          setIsEditing(null);
-      } catch(e) { alert("Erro ao salvar edição."); }
+  const getStatusLabel = (status: string) => {
+      switch(status) {
+          case 'em_aberto': return '🟡 AGUARDANDO';
+          case 'produzindo': return '👨‍🍳 PRODUZINDO';
+          case 'entrega': return '🛵 EM ROTA';
+          case 'finalizado': return '✅ FINALIZADO';
+          case 'cancelado': return '❌ CANCELADO';
+          default: return status;
+      }
   };
-
-  const editAddItem = (productId: string) => {
-      const prod = products.find(p => p.id === productId);
-      if (!prod) return;
-      // Adiciona item simples (sem complementos, para simplificar a edição rápida)
-      const newItem = {
-          id: prod.id, name: prod.name, price: prod.basePrice, quantity: 1, 
-          finalPrice: prod.basePrice, selectedOptions: {}
-      };
-      const newItems = [...editItems, newItem];
-      setEditItems(newItems);
-      recalcTotal(newItems);
-  };
-
-  const editRemoveItem = (index: number) => {
-      const newItems = [...editItems];
-      newItems.splice(index, 1);
-      setEditItems(newItems);
-      recalcTotal(newItems);
-  };
-
-  const editChangeQty = (index: number, delta: number) => {
-      const newItems = [...editItems];
-      newItems[index].quantity = Math.max(1, newItems[index].quantity + delta);
-      setEditItems(newItems);
-      recalcTotal(newItems);
-  };
-
-  const recalcTotal = (items: any[]) => {
-      // Recalcula considerando o preço unitário salvo no item
-      const total = items.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-      setEditTotal(total + (isEditing?.shippingPrice || 0));
-  };
-
-  // --- RENDER ---
-  const filteredOrders = filter === "todos" ? orders : 
-                         filter === "boleta_pendente" ? orders.filter(o => o.paymentMethod === 'conta_aberta' && o.status !== 'finalizado' && o.status !== 'cancelado') :
-                         orders.filter(o => o.status === filter);
 
   return (
-    <div className="pb-20">
-      {/* Header e Filtros (Igual anterior) */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-          <h1 className="text-2xl font-bold flex items-center gap-2">Gestão de Pedidos <span className="text-sm bg-gray-200 px-2 py-1 rounded-full">{filteredOrders.length}</span></h1>
-          <div className="flex items-center gap-2 bg-white p-1 rounded-lg border shadow-sm w-full md:w-auto">
-              <Filter size={16} className="ml-2 text-gray-400"/>
-              <select className="bg-transparent p-2 outline-none text-sm font-bold text-gray-700 w-full" value={filter} onChange={e => setFilter(e.target.value)}>
-                  <option value="todos">Todos</option>
-                  <option value="em_aberto">🟡 Novos / Abertos</option>
-                  <option value="produzindo">👨‍🍳 Produzindo</option>
-                  <option value="entrega">🛵 Em Rota</option>
-                  <option value="boleta_pendente">💰 Boletas Abertas</option>
-                  <option value="finalizado">✅ Finalizados</option>
-                  <option value="cancelado">❌ Cancelados</option>
-              </select>
+    <div className="pb-20 p-4 max-w-7xl mx-auto">
+      <div className="flex flex-col gap-6 mb-8">
+          <div className="flex justify-between items-center">
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+                Painel de Pedidos <span className="text-sm bg-gray-200 px-3 py-1 rounded-full text-gray-700">{filteredOrders.length}</span>
+            </h1>
+          </div>
+          
+          {/* BARRA DE FILTROS */}
+          <div className="bg-white p-4 rounded-xl shadow-sm border grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="flex flex-col">
+                  <label className="text-[10px] font-bold uppercase text-gray-400 mb-1">Status</label>
+                  <div className="relative">
+                      <Filter className="absolute left-3 top-2.5 text-gray-400" size={16}/>
+                      <select className="w-full pl-10 p-2 border rounded-lg bg-gray-50 text-sm font-bold outline-none focus:ring-2 ring-pink-100" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                          <option value="todos">Todos os Status</option>
+                          <option value="em_aberto">🟡 Novos / Abertos</option>
+                          <option value="produzindo">👨‍🍳 Em Produção</option>
+                          <option value="entrega">🛵 Em Rota</option>
+                          <option value="boleta_pendente">💰 Boletas Pendentes</option>
+                          <option value="finalizado">✅ Finalizados</option>
+                          <option value="cancelado">❌ Cancelados</option>
+                      </select>
+                  </div>
+              </div>
+
+              <div className="flex flex-col">
+                  <label className="text-[10px] font-bold uppercase text-gray-400 mb-1">Cliente</label>
+                  <div className="relative">
+                      <Search className="absolute left-3 top-2.5 text-gray-400" size={16}/>
+                      <input className="w-full pl-10 p-2 border rounded-lg bg-gray-50 text-sm outline-none focus:ring-2 ring-pink-100" placeholder="Nome do cliente..." value={clientFilter} onChange={e => setClientFilter(e.target.value)} />
+                  </div>
+              </div>
+
+              <div className="flex flex-col">
+                  <label className="text-[10px] font-bold uppercase text-gray-400 mb-1">Produto</label>
+                  <div className="relative">
+                      <Search className="absolute left-3 top-2.5 text-gray-400" size={16}/>
+                      <input className="w-full pl-10 p-2 border rounded-lg bg-gray-50 text-sm outline-none focus:ring-2 ring-pink-100" placeholder="Ex: X-Bacon..." value={productFilter} onChange={e => setProductFilter(e.target.value)} />
+                  </div>
+              </div>
+
+              <div className="flex flex-col">
+                  <label className="text-[10px] font-bold uppercase text-gray-400 mb-1">Data</label>
+                  <div className="relative">
+                      <Calendar className="absolute left-3 top-2.5 text-gray-400" size={16}/>
+                      <input type="date" className="w-full pl-10 p-2 border rounded-lg bg-gray-50 text-sm outline-none focus:ring-2 ring-pink-100" value={dateFilter} onChange={e => setDateFilter(e.target.value)} />
+                  </div>
+              </div>
           </div>
       </div>
       
       {loading ? <div className="p-20 flex justify-center"><Loader2 className="animate-spin text-pink-600"/></div> : (
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 gap-4">
           {filteredOrders.map(order => {
             const date = order.createdAt?.seconds ? new Date(order.createdAt.seconds * 1000) : new Date();
             let items: any[] = [];
             try { items = JSON.parse(order.items); } catch(e){}
-            const isPendente = order.paymentMethod === 'conta_aberta' && order.status !== 'finalizado' && order.status !== 'cancelado';
+            
+            const isBoleta = order.paymentMethod === 'conta_aberta';
+            const isPendente = isBoleta && order.status !== 'finalizado' && order.status !== 'cancelado';
 
             return (
-                <div key={order.id} className={`bg-white p-4 rounded-xl shadow-sm border-l-4 ${order.status === 'finalizado' ? 'border-l-green-500 opacity-60' : order.status === 'cancelado' ? 'border-l-red-500 opacity-60' : 'border-l-blue-500'}`}>
+                <div key={order.id} className={`p-5 rounded-xl shadow-md border-l-[6px] transition-all hover:shadow-lg ${getStatusStyle(order.status)}`}>
                     <div className="flex flex-col lg:flex-row justify-between gap-6">
+                        
+                        {/* Esquerda: Informações */}
                         <div className="flex-1">
-                            <div className="flex justify-between items-start">
+                            <div className="flex justify-between items-start mb-3">
                                 <div>
-                                    <h3 className="font-bold text-gray-800 text-lg">{order.userName} 
-                                        <button onClick={() => openEditModal(order)} className="ml-2 text-gray-400 hover:text-blue-600"><Edit size={14}/></button>
-                                    </h3>
-                                    <p className="text-xs text-gray-500 font-mono flex items-center gap-1">
-                                        <Clock size={10}/> {date.toLocaleDateString()} às {date.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-                                        <span className="bg-gray-100 px-1 rounded ml-1 font-bold">#{order.shortId || order.id.slice(0,4)}</span>
+                                    <div className="flex items-center gap-2">
+                                        <h3 className="font-bold text-gray-900 text-lg">{order.userName}</h3>
+                                        <span className="text-xs bg-gray-200 px-2 py-0.5 rounded font-mono text-gray-600">#{order.shortId || order.id.slice(0,4)}</span>
+                                    </div>
+                                    <p className="text-xs text-gray-500 font-medium flex items-center gap-1 mt-1">
+                                        <Clock size={12}/> {date.toLocaleDateString()} às {date.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
                                     </p>
                                 </div>
-                                <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${order.paymentMethod === 'conta_aberta' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>{order.paymentMethod === 'conta_aberta' ? 'CONTA MENSAL' : order.paymentMethod}</span>
+                                <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${isBoleta ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
+                                    {isBoleta ? 'CONTA MENSAL' : order.paymentMethod}
+                                </span>
                             </div>
-                            <div className="mt-3 bg-gray-50 p-3 rounded text-sm text-gray-700 space-y-1 border border-gray-100">
+
+                            <div className="bg-white/50 p-3 rounded-lg border border-gray-200/50 space-y-1">
                                 {items.map((i, idx) => (
-                                    <div key={idx} className="flex justify-between"><span>{i.quantity}x {i.name}</span></div>
+                                    <div key={idx} className="flex justify-between text-sm text-gray-700">
+                                        <span className="font-medium">{i.quantity}x {i.name}</span>
+                                        {/* Detalhe de opções se quiser mostrar aqui */}
+                                    </div>
                                 ))}
                             </div>
-                            <div className="mt-2 flex justify-between items-end"><p className="text-xs text-gray-500">{order.deliveryMethod === 'delivery' ? 'Entrega' : 'Retirada'}</p><p className="font-bold text-lg text-green-600">Total: R$ {order.total.toFixed(2)}</p></div>
+                            
+                            <div className="mt-3 flex justify-between items-end">
+                                <p className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1">
+                                    {order.deliveryMethod === 'delivery' ? <><Truck size={14}/> Entrega</> : '🏪 Retirada'}
+                                </p>
+                                <p className="font-bold text-xl text-slate-800">R$ {order.total.toFixed(2)}</p>
+                            </div>
                         </div>
 
-                        <div className="flex flex-col gap-2 min-w-[180px] border-t lg:border-t-0 lg:border-l pt-3 lg:pt-0 lg:pl-6 justify-center">
-                            {/* Botões de Status */}
-                            {isPendente && <button onClick={() => { if(confirm("Quitar pedido?")) updateStatus(order, 'finalizado'); }} className="w-full p-2 bg-green-600 text-white rounded text-xs font-bold flex justify-center gap-2 mb-1"><DollarSign size={14}/> QUITAR</button>}
+                        {/* Direita: Ações */}
+                        <div className="flex flex-col justify-center gap-3 min-w-[200px] border-t lg:border-t-0 lg:border-l pt-4 lg:pt-0 lg:pl-6 border-gray-200">
                             
-                            <div className="grid grid-cols-2 gap-2">
-                                <button onClick={() => updateStatus(order, 'produzindo')} className="p-2 bg-blue-50 text-blue-600 rounded text-xs font-bold flex flex-col items-center"><ChefHat size={14}/> Produzir</button>
-                                <button onClick={() => updateStatus(order, 'entrega')} className="p-2 bg-orange-50 text-orange-600 rounded text-xs font-bold flex flex-col items-center"><Truck size={14}/> Rota</button>
-                                <button onClick={() => updateStatus(order, 'finalizado')} className="p-2 bg-green-50 text-green-600 rounded text-xs font-bold flex flex-col items-center"><CheckCircle size={14}/> Finalizar</button>
-                                <button onClick={() => { if(confirm("Cancelar este pedido?")) updateStatus(order, 'cancelado'); }} className="p-2 bg-red-50 text-red-600 rounded text-xs font-bold flex flex-col items-center"><X size={14}/> Cancelar</button>
+                            {/* Status Label Gigante */}
+                            <div className="text-center">
+                                <span className={`text-sm font-black uppercase tracking-widest ${
+                                    order.status === 'em_aberto' ? 'text-yellow-600' : 
+                                    order.status === 'produzindo' ? 'text-blue-600' : 
+                                    order.status === 'entrega' ? 'text-orange-600' : 
+                                    order.status === 'finalizado' ? 'text-green-600' : 'text-red-600'
+                                }`}>
+                                    {getStatusLabel(order.status)}
+                                </span>
+                                {isPendente && <div className="text-[10px] text-purple-600 font-bold bg-purple-50 px-2 py-0.5 rounded mt-1">Aguardando Quitação</div>}
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 mt-2">
+                                <button onClick={() => updateStatus(order, 'produzindo')} className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-xs font-bold flex flex-col items-center transition"><ChefHat size={18} className="mb-1"/> Produzir</button>
+                                <button onClick={() => updateStatus(order, 'entrega')} className="p-2 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 text-xs font-bold flex flex-col items-center transition"><Truck size={18} className="mb-1"/> Rota</button>
+                                <button onClick={() => updateStatus(order, 'finalizado')} className="col-span-2 p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 text-xs font-bold flex items-center justify-center gap-2 transition"><CheckCircle size={18}/> {isPendente ? 'QUITAR & FINALIZAR' : 'FINALIZAR'}</button>
+                                <button onClick={() => { if(confirm("Cancelar este pedido? O estoque será devolvido.")) updateStatus(order, 'cancelado'); }} className="col-span-2 p-1 text-red-400 hover:text-red-600 text-[10px] font-bold flex items-center justify-center gap-1 transition"><X size={12}/> Cancelar Pedido</button>
                             </div>
                             
-                            {order.userPhone && <button onClick={() => window.open(`https://wa.me/${order.userPhone.replace(/\D/g, '')}`, '_blank')} className="mt-2 text-xs text-gray-400 hover:text-green-600 flex justify-center gap-1"><MessageCircle size={12}/> Abrir Conversa</button>}
+                            {order.userPhone && (
+                                <button onClick={() => window.open(`https://wa.me/${order.userPhone.replace(/\D/g, '')}`, '_blank')} className="mt-1 text-xs text-gray-400 hover:text-green-600 flex justify-center items-center gap-1">
+                                    <MessageCircle size={14}/> WhatsApp
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>
             );
           })}
-        </div>
-      )}
-
-      {/* MODAL DE EDIÇÃO */}
-      {isEditing && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white w-full max-w-md rounded-xl shadow-xl flex flex-col max-h-[90vh]">
-                <div className="p-4 border-b flex justify-between items-center"><h3 className="font-bold">Editar Pedido</h3><button onClick={() => setIsEditing(null)}><X/></button></div>
-                <div className="p-4 overflow-y-auto flex-1 space-y-4">
-                    {editItems.map((item, idx) => (
-                        <div key={idx} className="flex justify-between items-center bg-gray-50 p-2 rounded">
-                            <div className="flex-1">
-                                <p className="font-bold text-sm">{item.name}</p>
-                                <p className="text-xs text-gray-500">R$ {item.price.toFixed(2)} un</p>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                <button onClick={() => editChangeQty(idx, -1)} className="w-6 h-6 bg-gray-200 rounded font-bold">-</button>
-                                <span className="text-sm font-bold">{item.quantity}</span>
-                                <button onClick={() => editChangeQty(idx, 1)} className="w-6 h-6 bg-gray-200 rounded font-bold">+</button>
-                                <button onClick={() => editRemoveItem(idx)} className="text-red-500 ml-2"><Trash2 size={16}/></button>
-                            </div>
-                        </div>
-                    ))}
-                    
-                    <div className="pt-4 border-t">
-                        <label className="text-xs font-bold uppercase text-gray-500 mb-1 block">Adicionar Produto</label>
-                        <select className="w-full p-2 border rounded" onChange={(e) => { if(e.target.value) { editAddItem(e.target.value); e.target.value = ""; } }}>
-                            <option value="">Selecione...</option>
-                            {products.map(p => <option key={p.id} value={p.id}>{p.name} - R$ {p.basePrice.toFixed(2)}</option>)}
-                        </select>
-                    </div>
-                </div>
-                <div className="p-4 border-t bg-gray-50 flex justify-between items-center">
-                    <div><p className="text-xs text-gray-500">Novo Total</p><p className="font-bold text-lg text-green-600">R$ {editTotal.toFixed(2)}</p></div>
-                    <button onClick={saveEdit} className="bg-slate-900 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2"><Save size={18}/> Salvar</button>
-                </div>
+          {filteredOrders.length === 0 && (
+            <div className="text-center py-20 bg-white rounded-xl border border-dashed">
+                <Filter className="mx-auto text-gray-300 mb-2" size={48}/>
+                <p className="text-gray-500 font-medium">Nenhum pedido encontrado com estes filtros.</p>
+                <button onClick={() => { setFilterFilter("todos"); setClientFilter(""); setProductFilter(""); setDateFilter(""); }} className="text-pink-600 text-sm font-bold mt-2 hover:underline">Limpar Filtros</button>
             </div>
+          )}
         </div>
       )}
     </div>
   );
 }
+function setFilterFilter(arg0: string) { throw new Error("Function not implemented."); }
