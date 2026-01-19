@@ -86,6 +86,10 @@ export interface Order {
   
   // CORREÇÃO: Campo essencial para mensalistas
   isPaid?: boolean;
+
+  isManual?: boolean;
+  contractUrl?: string; // Link do contrato/foto
+  description?: string; // Descrição extra (ex: "Troca por Abacaxi")
 }
 
 export interface StoreSettings {
