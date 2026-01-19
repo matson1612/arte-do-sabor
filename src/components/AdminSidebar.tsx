@@ -6,70 +6,100 @@ import { usePathname } from "next/navigation";
 import { 
   LayoutDashboard, 
   ShoppingBag, 
-  UtensilsCrossed, 
   Users, 
+  UtensilsCrossed, 
   Settings, 
-  LogOut,
+  LogOut, 
+  X,
   Store
 } from "lucide-react";
-import { useAuth } from "@/context/AuthContext";
+import { auth } from "@/lib/firebase";
 
-export default function AdminSidebar() {
+interface SidebarProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export default function AdminSidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { logout } = useAuth();
 
-  const menuItems = [
-    { name: "Dashboard", href: "/admin/dashboard", icon: LayoutDashboard },
-    { name: "Pedidos", href: "/admin/orders", icon: ShoppingBag },
-    { name: "Cardápio", href: "/admin", icon: UtensilsCrossed }, // Página de Produtos
-    { name: "Clientes", href: "/admin/customers", icon: Users },
-    { name: "Loja & Frete", href: "/admin/settings", icon: Settings },
+  const links = [
+    { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/admin/orders", label: "Pedidos", icon: ShoppingBag },
+    { href: "/admin", label: "Produtos", icon: UtensilsCrossed },
+    { href: "/admin/customers", label: "Clientes", icon: Users },
+    // { href: "/admin/settings", label: "Configurações", icon: Settings },
   ];
 
+  const isActive = (path: string) => pathname === path || pathname.startsWith(path + "/");
+
   return (
-    <aside className="w-64 bg-slate-900 text-white min-h-screen flex flex-col fixed left-0 top-0 bottom-0 z-50">
-      {/* Logo Admin */}
-      <div className="p-6 border-b border-slate-800 flex items-center gap-2">
-        <Store className="text-pink-500" />
-        <div>
-            <h1 className="font-bold text-lg leading-tight">Painel Admin</h1>
-            <p className="text-xs text-slate-400">Gestão Arte do Sabor</p>
+    <>
+      {/* Overlay Escuro (Só aparece no Mobile quando aberto) */}
+      <div 
+        className={`fixed inset-0 bg-black/50 z-40 transition-opacity lg:hidden ${isOpen ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        onClick={onClose}
+      />
+
+      {/* Sidebar */}
+      <aside 
+        className={`
+          fixed top-0 left-0 z-50 h-full w-64 bg-slate-900 text-white shadow-xl transition-transform duration-300
+          lg:translate-x-0 lg:static lg:block
+          ${isOpen ? "translate-x-0" : "-translate-x-full"}
+        `}
+      >
+        <div className="flex flex-col h-full">
+            {/* Cabeçalho */}
+            <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+                <div>
+                    <h1 className="font-bold text-xl tracking-tight">Admin</h1>
+                    <p className="text-xs text-slate-400">Arte do Sabor</p>
+                </div>
+                {/* Botão Fechar (Só Mobile) */}
+                <button onClick={onClose} className="lg:hidden text-slate-400 hover:text-white">
+                    <X size={24}/>
+                </button>
+            </div>
+
+            {/* Links */}
+            <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+                {links.map((link) => {
+                    const Icon = link.icon;
+                    const active = isActive(link.href);
+                    
+                    return (
+                        <Link 
+                            key={link.href} 
+                            href={link.href}
+                            onClick={onClose} // Fecha menu ao clicar (mobile)
+                            className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium ${
+                                active 
+                                ? "bg-pink-600 text-white shadow-lg shadow-pink-900/20" 
+                                : "text-slate-400 hover:bg-slate-800 hover:text-white"
+                            }`}
+                        >
+                            <Icon size={20}/>
+                            {link.label}
+                        </Link>
+                    )
+                })}
+            </nav>
+
+            {/* Rodapé */}
+            <div className="p-4 border-t border-slate-800 space-y-2">
+                <Link href="/" className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white transition">
+                    <Store size={20}/> Ver Loja
+                </Link>
+                <button 
+                    onClick={() => auth.signOut()} 
+                    className="w-full flex items-center gap-3 px-4 py-3 text-red-400 hover:bg-red-950/30 hover:text-red-300 rounded-xl transition"
+                >
+                    <LogOut size={20}/> Sair
+                </button>
+            </div>
         </div>
-      </div>
-
-      {/* Navegação */}
-      <nav className="flex-1 p-4 space-y-2">
-        {menuItems.map((item) => {
-          const isActive = pathname === item.href || (item.href !== "/admin" && pathname.startsWith(item.href));
-          const Icon = item.icon;
-          
-          return (
-            <Link 
-              key={item.href} 
-              href={item.href}
-              className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium ${
-                isActive 
-                  ? "bg-pink-600 text-white shadow-lg shadow-pink-900/20" 
-                  : "text-slate-400 hover:bg-slate-800 hover:text-white"
-              }`}
-            >
-              <Icon size={20} />
-              {item.name}
-            </Link>
-          );
-        })}
-      </nav>
-
-      {/* Footer */}
-      <div className="p-4 border-t border-slate-800">
-        <button 
-            onClick={logout} 
-            className="flex items-center gap-3 w-full px-4 py-3 text-red-400 hover:bg-red-950/30 rounded-xl transition-colors font-medium"
-        >
-            <LogOut size={20} />
-            Sair do Sistema
-        </button>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 }
