@@ -7,14 +7,14 @@ import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { 
   ShoppingBag, Menu, User, X, Home, Gift, Star, 
-  LogIn, LogOut, Package, MapPin, ChevronDown 
+  LogIn, LogOut, Package, ChevronDown, FileText 
 } from "lucide-react";
 import { useState } from "react";
 
 export default function ClientHeader() {
   const pathname = usePathname();
   const { cartCount } = useCart();
-  const { user, logout, profile } = useAuth(); // Adicionei 'logout' e 'profile' se disponíveis no seu contexto
+  const { user, logout, profile } = useAuth();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const navLinks = [
@@ -26,7 +26,7 @@ export default function ClientHeader() {
   const userLinks = [
     { name: "Meus Pedidos", href: "/orders", icon: Package },
     { name: "Meus Dados", href: "/profile", icon: User },
-    // { name: "Minha Fatura", href: "/invoices", icon: FileText }, // Se quiser reativar
+    { name: "Minha Fatura", href: "/invoices", icon: FileText }, // <--- REATIVADO
   ];
 
   return (

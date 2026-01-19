@@ -1,6 +1,8 @@
 // src/types/index.ts
 
 export type ClientType = 'standard' | 'monthly';
+
+// Atualizado com todos os status que você usa
 export type OrderStatus = 'em_aberto' | 'produzindo' | 'entrega' | 'finalizado' | 'cancelado';
 export type SalesChannel = 'delivery' | 'encomenda' | 'evento';
 
@@ -8,10 +10,10 @@ export interface Option {
   id: string;
   name: string;
   priceAdd: number;
-  priceAddPostpaid?: number;
+  priceAddPostpaid?: number; 
   isAvailable: boolean;
   stock: number | null;
-  linkedProductId?: string;
+  linkedProductId?: string; 
 }
 
 export interface ComplementGroup {
@@ -35,14 +37,16 @@ export interface Product {
   availablePostpaid?: boolean;
   stock: number | null;
   complementGroupIds: string[];
-  price?: number;
+  
+  // Auxiliares do front
+  price?: number; 
   fullGroups?: ComplementGroup[];
+  
+  // Novos campos de Vitrine
   salesChannel?: SalesChannel;
   gallery?: string[];
   videoUrl?: string;
-  
-  // NOVO: Define se aparece no Carrossel
-  isFeatured?: boolean; 
+  isFeatured?: boolean;
 }
 
 export interface CartItem extends Product {
@@ -57,7 +61,7 @@ export interface UserProfile {
   name: string;
   email: string;
   photoURL?: string;
-  clientType?: ClientType;
+  clientType?: ClientType; 
   createdAt: any;
   phone?: string;
   address?: any;
@@ -69,13 +73,36 @@ export interface Order {
   userId: string;
   userName: string;
   userPhone: string;
-  items: string;
+  items: string; // JSON string
   total: number;
   status: OrderStatus;
   createdAt: any;
+  
+  // Campos obrigatórios para o Admin e Boleta
   paymentMethod: string;
   deliveryMethod: string;
   shippingPrice?: number;
   address?: any;
+  
+  // CORREÇÃO: Campo essencial para mensalistas
   isPaid?: boolean;
+}
+
+export interface StoreSettings {
+  id?: string; 
+  storeName: string;
+  cnpj: string;
+  phone: string;
+  address: {
+    street: string;
+    number: string;
+    district: string;
+    city: string;
+    state: string;
+  };
+  location: {
+    lat: number;
+    lng: number;
+  };
+  authorizedEmail: string;
 }
