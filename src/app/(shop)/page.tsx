@@ -109,9 +109,7 @@ export default function ShopHome() {
       { id: 'uncategorized', name: 'Geral', order: 999 }
   ].filter(c => groupedProducts[c.id] && groupedProducts[c.id].length > 0);
 
-  // --- LÓGICA DO MODAL ---
   const openModal = (product: Product) => {
-    // CORREÇÃO: Agora permite abrir mesmo se estoque for 0, apenas para visualizar
     setSelectedProduct(product);
     setQuantity(1);
     setObservation("");
@@ -143,7 +141,6 @@ export default function ShopHome() {
   const handleAddToCart = () => {
     if (!selectedProduct) return;
     
-    // Bloqueio extra de segurança
     if (selectedProduct.stock !== null && selectedProduct.stock <= 0) return alert("Produto esgotado.");
 
     const missingRequired = selectedProduct.fullGroups?.find(g => g.required && (!selectedOptions[g.id] || selectedOptions[g.id].length === 0));
@@ -197,22 +194,20 @@ export default function ShopHome() {
         })
       )}
       
-      {/* --- MODAL AJUSTADO --- */}
+      {/* --- MODAL RESPONSIVO (CORRIGIDO) --- */}
       {selectedProduct && (
-        // z-[60]: Garante que fique acima do Header (z-50)
-        // pt-24 items-start: Empurra o card para baixo (abaixo do menu de 80px) em vez de centralizar no meio da tela e ser cortado
-        <div className="fixed inset-0 z-[60] flex items-start justify-center bg-stone-900/60 p-4 pt-24 animate-in fade-in duration-300 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[60] flex items-center md:items-start justify-center bg-stone-900/60 p-4 md:pt-24 animate-in fade-in duration-300 backdrop-blur-sm">
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
             
-            {/* max-h-[calc(100vh-120px)]: Garante que o modal não extrapole a tela para baixo também */}
-            <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-8 duration-300 max-h-[calc(100vh-120px)] overflow-y-auto flex flex-col">
+            {/* Ajuste de Altura Máxima para Mobile (85vh) vs Desktop (calc) */}
+            <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-8 duration-300 max-h-[85vh] md:max-h-[calc(100vh-120px)] overflow-y-auto flex flex-col">
                 
-                {/* Imagem do Produto */}
-                <div className="h-64 bg-stone-100 relative flex-shrink-0">
+                {/* Imagem do Produto: Menor no Mobile (h-48), Maior no PC (h-64) */}
+                <div className="h-48 md:h-64 bg-stone-100 relative flex-shrink-0">
                     <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-white/80 backdrop-blur text-stone-800 p-2 rounded-full hover:bg-white shadow-sm transition"><X size={20}/></button>
                     {selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-stone-300"><ImageOff size={40}/></div>}
                     
-                    {/* Alerta Visual de Esgotado no Modal */}
+                    {/* Alerta de Esgotado */}
                     {selectedProduct.stock !== null && selectedProduct.stock <= 0 && (
                         <div className="absolute inset-0 bg-stone-900/50 backdrop-blur-[2px] flex items-center justify-center z-10">
                             <span className="bg-red-500 text-white px-4 py-2 rounded-full font-bold uppercase shadow-lg flex items-center gap-2">
@@ -220,7 +215,6 @@ export default function ShopHome() {
                             </span>
                         </div>
                     )}
-                    
                     <div className="absolute bottom-0 inset-x-0 h-20 bg-gradient-to-t from-white to-transparent"></div>
                 </div>
 
@@ -230,7 +224,6 @@ export default function ShopHome() {
                         <p className="text-stone-500 text-sm leading-relaxed">{selectedProduct.description}</p>
                     </div>
 
-                    {/* Complementos */}
                     {selectedProduct.fullGroups?.map(group => (
                         <div key={group.id} className="space-y-3">
                             <div className="flex justify-between items-center border-b border-stone-100 pb-2"><h3 className="font-bold text-stone-700 text-sm">{group.title}</h3><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${group.required ? 'bg-rose-100 text-rose-700' : 'bg-stone-100 text-stone-500'}`}>{group.required ? 'OBRIGATÓRIO' : 'OPCIONAL'}</span></div>
@@ -252,9 +245,7 @@ export default function ShopHome() {
                     <div><label className="font-bold text-stone-700 text-sm mb-2 flex items-center gap-2"><MessageSquare size={16}/> Alguma observação?</label><textarea className="w-full p-3 border border-stone-200 rounded-xl bg-stone-50 focus:bg-white focus:ring-2 focus:ring-pink-100 text-sm outline-none transition" rows={2} placeholder="Ex: Tirar cebola, caprichar no molho..." value={observation} onChange={e => setObservation(e.target.value)}/></div>
                 </div>
 
-                {/* Footer Fixo */}
                 <div className="p-4 bg-white border-t border-stone-100 flex items-center gap-4">
-                    {/* Variável auxiliar para checar estoque */}
                     {(() => {
                         const isOutOfStock = selectedProduct.stock !== null && selectedProduct.stock <= 0;
                         return (
