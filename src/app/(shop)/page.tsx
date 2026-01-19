@@ -6,7 +6,7 @@ import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
-import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X, CheckSquare, MessageSquare, ArrowRight } from "lucide-react";
+import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X, CheckSquare, MessageSquare } from "lucide-react";
 import { Product, ComplementGroup, Option, Category } from "@/types";
 import HeroCarousel from "@/components/HeroCarousel";
 
@@ -15,7 +15,7 @@ export default function ShopHome() {
   const { profile } = useAuth();
   
   const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]); // Lista de categorias
+  const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -44,11 +44,11 @@ export default function ShopHome() {
             getDocs(query(collection(db, "categories"), orderBy("order")))
         ]);
 
-        // Mapa de Produtos para Rápido Acesso (Hidratação)
+        // 1. Mapa de Produtos (Para busca rápida)
         const productMap = new Map<string, Product>();
         productsSnap.docs.forEach(doc => { productMap.set(doc.id, { id: doc.id, ...doc.data() } as Product); });
 
-        // Hidrata grupos
+        // 2. Hidratar Grupos (Pega dados reais dos produtos vinculados)
         const groupsMap: Record<string, ComplementGroup> = {};
         groupsSnap.docs.forEach(doc => {
             const groupData = doc.data() as ComplementGroup;
@@ -70,7 +70,7 @@ export default function ShopHome() {
             groupsMap[doc.id] = { id: doc.id, ...groupData, options: hydratedOptions || [] };
         });
 
-        // Lista Final de Produtos
+        // 3. Montar Lista Final
         const items = Array.from(productMap.values()).map((p) => {
           const channel = p.salesChannel || 'delivery';
           const groupIds = p.complementGroupIds || [];
@@ -94,7 +94,7 @@ export default function ShopHome() {
       return p.availableStandard !== false;
   });
 
-  // --- AGRUPAMENTO POR CATEGORIA ---
+  // Agrupamento por Categoria
   const groupedProducts: Record<string, Product[]> = {};
   categories.forEach(cat => groupedProducts[cat.id] = []);
   groupedProducts['uncategorized'] = [];
@@ -108,17 +108,17 @@ export default function ShopHome() {
       }
   });
 
-  // Categorias que serão renderizadas (apenas as que têm produtos)
+  // Filtra apenas categorias que têm produtos
   const catsToRender = [
       ...categories, 
       { id: 'uncategorized', name: 'Geral', order: 999 }
   ].filter(c => groupedProducts[c.id] && groupedProducts[c.id].length > 0);
 
-  // ... (Funções Modal e Carrinho mantidas) ...
+  // --- Funções de Modal (Iguais) ---
   const openModal = (product: Product) => { if (product.stock !== null && product.stock <= 0) return; setSelectedProduct(product); setQuantity(1); setObservation(""); setSelectedOptions({}); };
   const toggleOption = (group: ComplementGroup, option: Option) => { const currentSelected = selectedOptions[group.id] || []; const isAlreadySelected = currentSelected.find(o => o.id === option.id); let newSelection = []; if (isAlreadySelected) newSelection = currentSelected.filter(o => o.id !== option.id); else { if (group.maxSelection === 1) newSelection = [option]; else { if (currentSelected.length >= group.maxSelection) return alert(`Máximo de ${group.maxSelection} opções.`); newSelection = [...currentSelected, option]; } } setSelectedOptions({ ...selectedOptions, [group.id]: newSelection }); };
   const calculateTotal = () => { if (!selectedProduct) return 0; let total = getPrice(selectedProduct); Object.values(selectedOptions).flat().forEach(opt => total += getOptionPrice(opt)); return total * quantity; };
-  const handleAddToCart = () => { if (!selectedProduct) return; const missingRequired = selectedProduct.fullGroups?.find(g => g.required && (!selectedOptions[g.id] || selectedOptions[g.id].length === 0)); if (missingRequired) return alert(`Grupo "${missingRequired.title}" obrigatório.`); let customName = selectedProduct.name; const allSelectedOpts = Object.values(selectedOptions).flat(); if (allSelectedOpts.length > 0) { const optNames = allSelectedOpts.map(o => o.name).join(', '); customName += ` (+ ${optNames})`; } if (observation.trim()) customName += ` [Obs: ${observation}]`; addToCart({ ...selectedProduct, name: customName, price: calculateTotal() / quantity, selectedOptions: selectedOptions }, quantity); setSelectedProduct(null); };
+  const handleAddToCart = () => { if (!selectedProduct) return; const missingRequired = selectedProduct.fullGroups?.find(g => g.required && (!selectedOptions[g.id] || selectedOptions[g.id].length === 0)); if (missingRequired) return alert(`Grupo "${missingRequired.title}" é obrigatório.`); let customName = selectedProduct.name; const allSelectedOpts = Object.values(selectedOptions).flat(); if (allSelectedOpts.length > 0) { const optNames = allSelectedOpts.map(o => o.name).join(', '); customName += ` (+ ${optNames})`; } if (observation.trim()) customName += ` [Obs: ${observation}]`; addToCart({ ...selectedProduct, name: customName, price: calculateTotal() / quantity, selectedOptions: selectedOptions }, quantity); setSelectedProduct(null); };
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-pink-500" size={40}/></div>;
 
@@ -130,7 +130,7 @@ export default function ShopHome() {
         <div className="text-center text-stone-400 py-20"><ShoppingBag size={48} className="mx-auto mb-4 opacity-20"/><p>Nenhuma delícia disponível agora.</p></div>
       ) : (
         catsToRender.map((category) => {
-            // Ordenação: Com Estoque primeiro, depois Sem Estoque
+            // Ordena produtos: Estoque > Sem Estoque
             const items = groupedProducts[category.id].sort((a, b) => {
                 const aStock = a.stock !== null && a.stock <= 0 ? 0 : 1;
                 const bStock = b.stock !== null && b.stock <= 0 ? 0 : 1;
@@ -160,7 +160,7 @@ export default function ShopHome() {
         })
       )}
       
-      {/* Modal igual... */}
+      {/* Modal Detalhes */}
       {selectedProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 p-4 animate-in fade-in duration-300 backdrop-blur-sm">
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>

@@ -41,7 +41,7 @@ export default function CartPage() {
   const isMonthlyOrReseller = profile?.clientType === 'monthly' || profile?.clientType === 'reseller';
 
   useEffect(() => {
-    // Validação de Estoque Visual
+    // Validação Visual de Estoque ao Carregar
     const validateCartStock = async () => {
         if (items.length === 0) return;
         const warnings: string[] = [];
@@ -79,7 +79,7 @@ export default function CartPage() {
   useEffect(() => {
     if (paymentMethod === 'conta_aberta' || deliveryMethod === 'pickup') setShippingPrice(0);
     else {
-        // Lógica simples de frete fixo por região (pode expandir para GPS depois)
+        // Lógica de frete fixo simplificada
         setShippingPrice(8.00); 
     }
   }, [deliveryMethod, paymentMethod]);
@@ -107,11 +107,11 @@ export default function CartPage() {
     if (isSubmitting) return;
 
     const finalPhone = profile?.phone || missingPhone;
-    if (!finalPhone || finalPhone.length < 8) return alert("Informe um WhatsApp válido.");
+    if (!finalPhone || finalPhone.length < 8) return alert("Informe um WhatsApp válido para contato.");
 
     const selectedAddr = savedAddresses.find(a => a.id === selectedAddressId);
     if (deliveryMethod === 'delivery' && !selectedAddr && !address.number && paymentMethod !== 'conta_aberta') {
-        return alert("Selecione um endereço.");
+        return alert("Por favor, selecione ou informe um endereço.");
     }
 
     setIsSubmitting(true);
@@ -119,70 +119,103 @@ export default function CartPage() {
     const shortId = generateShortId(); 
 
     try {
+        // Salva telefone se não existir
         if (!profile?.phone && missingPhone) {
             await updateDoc(doc(db, "users", user.uid), { phone: missingPhone });
         }
 
         await runTransaction(db, async (transaction) => {
-            // 1. Validação de Estoque (Produtos Principais)
-            for (const item of items) {
-                if (item.id) {
-                    const prodRef = doc(db, "products", item.id);
-                    const prodSnap = await transaction.get(prodRef);
-                    if (!prodSnap.exists()) throw new Error(`Produto ${item.name} não existe.`);
-                    const currentStock = prodSnap.data().stock;
-                    if (currentStock !== null && currentStock < item.quantity) {
-                        throw new Error(`Estoque insuficiente para ${item.name}.`);
-                    }
-                    transaction.update(prodRef, { stock: currentStock - item.quantity });
-                }
+            // --- PASSO 1: CALCULAR DEMANDA ---
+            // Agrupa quanto precisa ser baixado de cada produto/opção
+            const productDecrements = new Map<string, number>();
+            const groupOptionDecrements = new Map<string, Map<string, number>>();
 
-                // 2. Validação de Complementos (CORRIGIDO PARA LINKED PRODUCT)
+            const addProdDec = (id: string, qty: number) => {
+                const current = productDecrements.get(id) || 0;
+                productDecrements.set(id, current + qty);
+            };
+
+            for (const item of items) {
+                // Produto Principal
+                if (item.id) addProdDec(item.id, item.quantity);
+                
+                // Complementos
                 if (item.selectedOptions) {
                     for (const [groupId, opts] of Object.entries(item.selectedOptions)) {
-                        const groupRef = doc(db, "complement_groups", groupId);
-                        const groupSnap = await transaction.get(groupRef);
-                        
-                        if (groupSnap.exists()) {
-                            const optionsList = groupSnap.data().options || [];
-                            let groupChanged = false;
-
-                            // Percorre as opções escolhidas
-                            for (const userOpt of (opts as Option[])) {
-                                if (userOpt.linkedProductId) {
-                                    // SE FOR PRODUTO VINCULADO: Desconta do produto real
-                                    const linkedRef = doc(db, "products", userOpt.linkedProductId);
-                                    const linkedSnap = await transaction.get(linkedRef);
-                                    if (!linkedSnap.exists()) throw new Error(`Complemento ${userOpt.name} não existe mais.`);
-                                    
-                                    const linkedStock = linkedSnap.data().stock;
-                                    // A quantidade consumida é a do produto pai (1 refri por 1 combo)
-                                    // Se quiser que o complemento tenha qtd própria, precisa mudar a estrutura do carrinho
-                                    // Aqui assumimos 1:1 com o item principal
-                                    const qtyNeeded = item.quantity;
-
-                                    if (linkedStock !== null) {
-                                        if (linkedStock < qtyNeeded) throw new Error(`Estoque insuficiente para complemento: ${userOpt.name}`);
-                                        transaction.update(linkedRef, { stock: linkedStock - qtyNeeded });
-                                    }
-                                } else {
-                                    // SE FOR OPÇÃO SIMPLES: Desconta do array do grupo
-                                    const idx = optionsList.findIndex((o: any) => o.id === userOpt.id);
-                                    if (idx !== -1 && optionsList[idx].stock !== null) {
-                                        if (optionsList[idx].stock < item.quantity) throw new Error(`Estoque insuficiente: ${userOpt.name}`);
-                                        optionsList[idx].stock -= item.quantity;
-                                        groupChanged = true;
-                                    }
-                                }
+                        for (const opt of (opts as Option[])) {
+                            if (opt.linkedProductId) {
+                                // Produto Vinculado: Baixa do produto original
+                                addProdDec(opt.linkedProductId, item.quantity);
+                            } else {
+                                // Opção Simples: Baixa do grupo
+                                if (!groupOptionDecrements.has(groupId)) groupOptionDecrements.set(groupId, new Map());
+                                const grpMap = groupOptionDecrements.get(groupId)!;
+                                const currOptQty = grpMap.get(opt.id) || 0;
+                                grpMap.set(opt.id, currOptQty + item.quantity);
                             }
-
-                            // Só atualiza o grupo se houve mudança em opções simples
-                            if (groupChanged) transaction.update(groupRef, { options: optionsList });
                         }
                     }
                 }
             }
 
+            // --- PASSO 2: LEITURAS (READS) ---
+            // Lê todos os documentos necessários DE UMA VEZ
+            const productSnaps = new Map();
+            const groupSnaps = new Map();
+
+            // Ler Produtos
+            for (const prodId of productDecrements.keys()) {
+                const ref = doc(db, "products", prodId);
+                const snap = await transaction.get(ref);
+                productSnaps.set(prodId, snap);
+            }
+
+            // Ler Grupos
+            for (const groupId of groupOptionDecrements.keys()) {
+                const ref = doc(db, "complement_groups", groupId);
+                const snap = await transaction.get(ref);
+                groupSnaps.set(groupId, snap);
+            }
+
+            // --- PASSO 3: VALIDAÇÃO E ESCRITAS (WRITES) ---
+            
+            // Atualizar Produtos
+            for (const [prodId, qtyToRemove] of productDecrements.entries()) {
+                const snap = productSnaps.get(prodId);
+                if (!snap.exists()) throw new Error(`Produto (ID: ${prodId}) não encontrado.`);
+                
+                const currentStock = snap.data().stock;
+                if (currentStock !== null) {
+                    if (currentStock < qtyToRemove) {
+                        throw new Error(`Estoque insuficiente para "${snap.data().name}". Disponível: ${currentStock}.`);
+                    }
+                    transaction.update(doc(db, "products", prodId), { stock: currentStock - qtyToRemove });
+                }
+            }
+
+            // Atualizar Grupos
+            for (const [groupId, optsToRemove] of groupOptionDecrements.entries()) {
+                const snap = groupSnaps.get(groupId);
+                if (!snap.exists()) throw new Error(`Grupo de opções não encontrado.`);
+                
+                const optionsList = snap.data().options || [];
+                let changed = false;
+
+                for (const [optId, qty] of optsToRemove.entries()) {
+                    const idx = optionsList.findIndex((o:any) => o.id === optId);
+                    if (idx !== -1 && optionsList[idx].stock !== null) {
+                        if (optionsList[idx].stock < qty) throw new Error(`Estoque insuficiente para opção "${optionsList[idx].name}".`);
+                        optionsList[idx].stock -= qty;
+                        changed = true;
+                    }
+                }
+                
+                if (changed) {
+                    transaction.update(doc(db, "complement_groups", groupId), { options: optionsList });
+                }
+            }
+
+            // Criar Pedido
             const newOrderRef = doc(collection(db, "orders"));
             transaction.set(newOrderRef, {
                 shortId: shortId,
@@ -201,6 +234,7 @@ export default function CartPage() {
             });
         });
 
+        // Sucesso
         let msg = `*PEDIDO #${shortId} - ${profile?.name || user.displayName}*\n`;
         if (paymentMethod === 'conta_aberta') msg += `⚠️ *PEDIDO NA CONTA*\n`;
         msg += `--------------------------------\n`;
@@ -220,7 +254,7 @@ export default function CartPage() {
 
     } catch (error: any) {
         console.error(error);
-        alert(error.message || "Erro ao processar pedido.");
+        alert(error.message || "Erro ao processar pedido. Tente novamente.");
         window.location.reload();
     } finally {
         setIsSubmitting(false);
