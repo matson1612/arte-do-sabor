@@ -48,10 +48,7 @@ export default function EspeciaisPage() {
 
       <div className="relative rounded-3xl overflow-hidden bg-stone-900 shadow-xl shadow-stone-200 h-32 flex items-center justify-center text-center p-6">
           <div className="absolute inset-0 opacity-50 bg-[url('https://images.unsplash.com/photo-1519671482502-9759101d4561?q=80&w=2070')] bg-cover bg-center"></div>
-          <div className="relative z-10 text-white">
-              <h1 className="text-2xl font-bold mb-2 text-shadow">Eventos & Festas</h1>
-              <p className="text-stone-100 text-xs font-medium">Kits para celebrar.</p>
-          </div>
+
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
