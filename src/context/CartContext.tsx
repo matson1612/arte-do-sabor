@@ -1,102 +1,93 @@
+// src/context/CartContext.tsx
 "use client";
 
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-
-export interface CartItem {
-  cartId: string;
-  id: string;
-  name: string;
-  price: number;
-  quantity: number;
-  imageUrl?: string;
-  finalPrice: number;
-}
+import { CartItem } from "@/types"; // Importa o tipo correto global
 
 interface CartContextType {
   items: CartItem[];
-  addToCart: (item: any, quantity: number) => void;
+  addToCart: (item: CartItem, quantity: number) => void;
   removeFromCart: (cartId: string) => void;
+  updateQuantity: (cartId: string, newQuantity: number) => void; // <--- AGORA EXISTE
   clearCart: () => void;
   cartTotal: number;
   cartCount: number;
 }
 
-const CartContext = createContext<CartContextType | undefined>(undefined);
+const CartContext = createContext<CartContextType>({} as CartContextType);
 
 export function CartProvider({ children }: { children: ReactNode }) {
-  // 1. Começamos SEMPRE com array vazio para evitar erro na tela
   const [items, setItems] = useState<CartItem[]>([]);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // 2. Só acessamos o LocalStorage depois que a página carregou (useEffect)
+  // Carrega do localStorage
   useEffect(() => {
     if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem("cart");
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) {
-            // Sanitização: Garante que preço e qtd sejam números
-            const cleanItems = parsed.map((i: any) => ({
-                ...i,
-                price: Number(i.price) || 0,
-                quantity: Number(i.quantity) || 1,
-                finalPrice: (Number(i.price) || 0) * (Number(i.quantity) || 1)
-            }));
-            setItems(cleanItems);
-          }
-        }
-      } catch (error) {
-        console.error("Erro ao recuperar carrinho, resetando.", error);
-        localStorage.removeItem("cart");
-      } finally {
-        setIsInitialized(true);
+      const saved = localStorage.getItem("cart_storage");
+      if (saved) {
+        try { setItems(JSON.parse(saved)); } 
+        catch (e) { console.error("Erro no carrinho", e); }
       }
+      setIsInitialized(true);
     }
   }, []);
 
-  // 3. Salva mudanças (apenas após inicializado)
+  // Salva no localStorage
   useEffect(() => {
     if (isInitialized) {
-      localStorage.setItem("cart", JSON.stringify(items));
+      localStorage.setItem("cart_storage", JSON.stringify(items));
     }
   }, [items, isInitialized]);
 
-  const addToCart = (product: any, quantity: number) => {
-    const price = Number(product.price) || 0;
-    const newItem: CartItem = {
-      cartId: Math.random().toString(36).substr(2, 9),
-      id: product.id,
-      name: product.name,
-      price: price,
-      quantity: quantity,
-      imageUrl: product.imageUrl,
-      finalPrice: price * quantity,
-    };
-    setItems((prev) => [...prev, newItem]);
+  const addToCart = (newItem: CartItem, quantity: number) => {
+    setItems((prev) => {
+      // Procura item idêntico (mesmo produto E mesmas opções)
+      const existingIdx = prev.findIndex((i) => 
+        i.id === newItem.id && 
+        JSON.stringify(i.selectedOptions) === JSON.stringify(newItem.selectedOptions)
+      );
+
+      if (existingIdx >= 0) {
+        const updated = [...prev];
+        updated[existingIdx].quantity += quantity;
+        // Atualiza preço final também
+        updated[existingIdx].finalPrice = updated[existingIdx].price! * updated[existingIdx].quantity;
+        return updated;
+      }
+      
+      return [...prev, { ...newItem, quantity, cartId: crypto.randomUUID() }];
+    });
+  };
+
+  // Função que faltava
+  const updateQuantity = (cartId: string, newQuantity: number) => {
+      if (newQuantity < 1) return;
+      setItems(prev => prev.map(item => {
+          if (item.cartId === cartId) {
+              return { 
+                  ...item, 
+                  quantity: newQuantity,
+                  finalPrice: (item.price || 0) * newQuantity
+              };
+          }
+          return item;
+      }));
   };
 
   const removeFromCart = (cartId: string) => {
-    setItems((prev) => prev.filter((item) => item.cartId !== cartId));
+    setItems((prev) => prev.filter((i) => i.cartId !== cartId));
   };
 
-  const clearCart = () => {
-    setItems([]);
-    localStorage.removeItem("cart");
-  };
+  const clearCart = () => setItems([]);
 
   const cartTotal = items.reduce((acc, item) => acc + (item.finalPrice || 0), 0);
   const cartCount = items.reduce((acc, item) => acc + (item.quantity || 0), 0);
 
   return (
-    <CartContext.Provider value={{ items, addToCart, removeFromCart, clearCart, cartTotal, cartCount }}>
+    <CartContext.Provider value={{ items, addToCart, removeFromCart, updateQuantity, clearCart, cartTotal, cartCount }}>
       {children}
     </CartContext.Provider>
   );
 }
 
-export const useCart = () => {
-  const context = useContext(CartContext);
-  if (!context) throw new Error("useCart deve ser usado dentro de CartProvider");
-  return context;
-};
+export const useCart = () => useContext(CartContext);

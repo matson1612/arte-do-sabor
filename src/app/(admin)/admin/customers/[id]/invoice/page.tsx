@@ -46,7 +46,7 @@ export default function InvoicePage({ params }: { params: Promise<{ id: string }
   const totalAmount = orders.reduce((acc, curr) => acc + (curr.total || 0), 0);
 
   const handleSettleAll = async () => {
-      if (!confirm(`Confirma o pagamento de R$ ${totalAmount.toFixed(2)}?`)) return;
+      if (!confirm(`Confirmar recebimento de R$ ${totalAmount.toFixed(2)}?`)) return;
       setProcessing(true);
       try {
           const batch = writeBatch(db);
@@ -80,7 +80,7 @@ export default function InvoicePage({ params }: { params: Promise<{ id: string }
         <div className="mb-8 bg-gray-50 p-4 rounded border"><h2 className="text-xl font-bold text-slate-800">{client?.name}</h2></div>
         {orders.length === 0 ? <div className="text-center py-10 text-gray-400">Nenhuma pendência.</div> : (
             <table className="w-full text-left mb-8">
-                <thead><tr className="border-b"><th className="py-2">Data</th><th className="py-2">ID</th><th>Itens</th><th className="text-right">Valor</th></tr></thead>
+                <thead><tr className="border-b"><th className="py-2">Data</th><th className="py-2">ID</th><th>Status</th><th className="text-right">Valor</th></tr></thead>
                 <tbody className="divide-y">{orders.map((order) => {
                     const date = order.createdAt ? new Date(order.createdAt.seconds * 1000) : new Date();
                     let itemsList = ""; try { itemsList = JSON.parse(order.items).map((i: any) => `${i.quantity}x ${i.name}`).join(', '); } catch (e) {}
@@ -88,8 +88,7 @@ export default function InvoicePage({ params }: { params: Promise<{ id: string }
                         <tr key={order.id}>
                             <td className="py-3 text-sm text-gray-700 w-24 align-top">{date.toLocaleDateString('pt-BR')}</td>
                             <td className="py-3 text-xs font-mono text-gray-500 w-20 align-top">#{order.shortId || order.id.slice(0,4)}</td>
-                            <td className="py-3 text-sm text-gray-800 align-top">{itemsList}</td>
-                            <td className="py-3 text-sm font-bold text-slate-900 text-right align-top">{order.total.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</td>
+                            <td className="py-3 text-sm">{order.status === 'finalizado' ? 'Entregue' : order.status}</td><td className="py-3 text-sm font-bold text-slate-900 text-right">{order.total.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</td>
                         </tr>
                     )
                 })}</tbody>

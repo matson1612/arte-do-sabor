@@ -44,7 +44,7 @@ export default function MyInvoicesPage() {
       <div className="bg-gradient-to-r from-purple-700 to-indigo-600 rounded-2xl p-6 text-white shadow-lg mb-6"><p className="opacity-80 text-sm font-medium mb-1">Total a Pagar</p><h2 className="text-4xl font-bold">R$ {openTotal.toFixed(2)}</h2></div>
       <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2"><FileText size={18}/> Detalhamento</h3>
       <div className="space-y-3">
-        {orders.length === 0 ? <div className="text-center py-10 bg-white rounded-xl border border-dashed"><p className="text-gray-400 font-medium">Tudo pago!</p></div> 
+        {orders.length === 0 ? <div className="text-center py-10 bg-white rounded-xl border border-dashed"><p className="text-gray-400 font-medium">Tudo pago! Nenhuma pendência.</p></div> 
         : orders.map(order => {
             const date = order.createdAt ? new Date(order.createdAt.seconds * 1000) : new Date();
             let itemsText = ""; try { itemsText = JSON.parse(order.items).map((i: any) => `${i.quantity}x ${i.name}`).join(", "); } catch(e) {}

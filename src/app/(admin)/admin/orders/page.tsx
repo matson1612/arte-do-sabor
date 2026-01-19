@@ -41,8 +41,7 @@ export default function AdminOrdersPage() {
   }, []);
 
   const adjustStock = async (order: Order, multiplier: number) => {
-      let items: CartItem[] = [];
-      try { items = JSON.parse(order.items); } catch(e){ return; }
+      let items: CartItem[] = []; try { items = JSON.parse(order.items); } catch(e){ return; }
       await runTransaction(db, async (transaction) => {
           for (const item of items) {
               if (item.id) {
@@ -77,23 +76,19 @@ export default function AdminOrdersPage() {
   const updateStatus = async (order: Order, newStatus: OrderStatus) => {
     try {
         const oldStatus = order.status;
-        if (oldStatus === 'em_aberto' && newStatus === 'produzindo') await adjustStock(order, -1);
-        if (oldStatus !== 'em_aberto' && oldStatus !== 'cancelado' && newStatus === 'cancelado') await adjustStock(order, 1);
+        if (oldStatus !== 'cancelado' && newStatus === 'cancelado') await adjustStock(order, 1);
+        if (oldStatus === 'cancelado' && newStatus !== 'cancelado') await adjustStock(order, -1);
 
         await updateDoc(doc(db, "orders", order.id), { status: newStatus });
         notifyClient(order, newStatus);
     } catch (e) { alert("Erro ao atualizar."); }
   };
 
-  // QUITAR BOLETA: Marca isPaid = true
+  // QUITAR BOLETA: Marca isPaid = true. NÃO muda o status de entrega (pode já ter sido entregue).
   const handleQuitarBoleta = async (order: Order) => {
       if(!confirm(`Confirmar pagamento de R$ ${order.total.toFixed(2)}?`)) return;
       await updateDoc(doc(db, "orders", order.id), { isPaid: true });
-      // Opcional: Se ainda não estava finalizado, finaliza também
-      if (order.status !== 'finalizado') {
-          await updateStatus(order, 'finalizado');
-      }
-      alert("Pedido quitado!");
+      alert("Pagamento registrado!");
   };
 
   const notifyClient = (order: Order, newStatus: string) => {
@@ -110,11 +105,10 @@ export default function AdminOrdersPage() {
       if (msg) window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
-  // Filtros
   const filteredOrders = orders.filter(order => {
       if (statusFilter !== "todos") {
           if (statusFilter === "boleta_pendente") {
-              // Filtra por isPaid == false e conta aberta
+              // FILTRO CORRIGIDO: Se for conta aberta, não pago e não cancelado
               if (order.paymentMethod !== 'conta_aberta' || order.isPaid === true || order.status === 'cancelado') return false;
           } else if (order.status !== statusFilter) {
               return false;
@@ -132,7 +126,7 @@ export default function AdminOrdersPage() {
   const getStatusStyle = (status: string) => { switch(status) { case 'em_aberto': return 'border-l-yellow-500 bg-yellow-50'; case 'produzindo': return 'border-l-blue-600 bg-blue-50'; case 'entrega': return 'border-l-orange-500 bg-orange-50'; case 'finalizado': return 'border-l-green-600 bg-white opacity-70'; case 'cancelado': return 'border-l-red-600 bg-red-50 opacity-60'; default: return 'border-l-gray-400 bg-white'; } };
   const getStatusLabel = (status: string) => { switch(status) { case 'em_aberto': return 'AGUARDANDO'; case 'produzindo': return 'PRODUZINDO'; case 'entrega': return 'EM ROTA'; case 'finalizado': return 'ENTREGUE'; case 'cancelado': return 'CANCELADO'; default: return status; } };
 
-  // Edição
+  // Edição (mantida)
   const openEditModal = (order: Order) => { setIsEditing(order); try { setEditItems(JSON.parse(order.items)); setEditTotal(order.total); } catch(e) { setEditItems([]); } };
   const saveEdit = async () => { if (!isEditing) return; try { await updateDoc(doc(db, "orders", isEditing.id), { items: JSON.stringify(editItems), total: editTotal }); alert("Atualizado!"); setIsEditing(null); } catch(e) { alert("Erro ao editar"); } };
   const editAddItem = (productId: string) => { const p = products.find(x => x.id === productId); if(p) { const newItem = { id: p.id, name: p.name, price: p.basePrice, quantity: 1, finalPrice: p.basePrice, selectedOptions: {} }; setEditItems([...editItems, newItem]); setEditTotal(t => t + p.basePrice); } };
@@ -155,8 +149,7 @@ export default function AdminOrdersPage() {
         <div className="grid grid-cols-1 gap-4">
           {filteredOrders.map(order => {
             const date = order.createdAt?.seconds ? new Date(order.createdAt.seconds * 1000) : new Date();
-            let items: any[] = [];
-            try { items = JSON.parse(order.items); } catch(e){}
+            let items: any[] = []; try { items = JSON.parse(order.items); } catch(e){}
             const isBoleta = order.paymentMethod === 'conta_aberta';
             const isPendente = isBoleta && !order.isPaid && order.status !== 'cancelado';
 
@@ -176,10 +169,7 @@ export default function AdminOrdersPage() {
                         </div>
 
                         <div className="flex flex-col justify-center gap-3 min-w-[100%] lg:min-w-[200px] border-t lg:border-t-0 lg:border-l pt-4 lg:pt-0 lg:pl-6 border-gray-200">
-                            <div className="text-center">
-                                <span className={`text-sm font-black uppercase tracking-widest ${order.status === 'em_aberto' ? 'text-yellow-600' : 'text-gray-600'}`}>{getStatusLabel(order.status)}</span>
-                                {isPendente && <div className="text-[10px] text-purple-600 font-bold bg-purple-50 px-2 py-0.5 rounded mt-1">NÃO PAGO</div>}
-                            </div>
+                            <div className="text-center"><span className={`text-sm font-black uppercase tracking-widest ${order.status === 'em_aberto' ? 'text-yellow-600' : 'text-gray-600'}`}>{getStatusLabel(order.status)}</span>{isPendente && <div className="text-[10px] text-purple-600 font-bold bg-purple-50 px-2 py-0.5 rounded mt-1">NÃO PAGO</div>}</div>
                             
                             {/* QUITAR (Se for boleta pendente) */}
                             {isPendente && <button onClick={() => handleQuitarBoleta(order)} className="w-full p-2 bg-green-600 text-white rounded text-xs font-bold flex justify-center gap-2 mb-1"><DollarSign size={14}/> QUITAR</button>}

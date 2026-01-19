@@ -38,6 +38,7 @@ export interface Product {
   fullGroups?: ComplementGroup[];
 }
 
+// Correção: CartItem herda de Product e tem selectedOptions
 export interface CartItem extends Product {
   cartId: string;
   selectedOptions: Record<string, Option[]>;
@@ -71,7 +72,5 @@ export interface Order {
   deliveryMethod: string;
   shippingPrice?: number;
   address?: any;
-  
-  // NOVO CAMPO: Controla se o dinheiro entrou no caixa
-  isPaid: boolean; 
+  isPaid?: boolean; // Novo campo
 }
