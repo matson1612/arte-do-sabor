@@ -3,6 +3,9 @@
 export type ClientType = 'standard' | 'monthly';
 export type OrderStatus = 'em_aberto' | 'produzindo' | 'entrega' | 'finalizado' | 'cancelado';
 
+// NOVO: Canal de Venda (Onde o produto aparece?)
+export type SalesChannel = 'delivery' | 'encomenda' | 'evento';
+
 export interface Option {
   id: string;
   name: string;
@@ -36,9 +39,11 @@ export interface Product {
   complementGroupIds: string[];
   price?: number;
   fullGroups?: ComplementGroup[];
+  
+  // NOVO CAMPO
+  salesChannel?: SalesChannel; 
 }
 
-// Correção: CartItem herda de Product e tem selectedOptions
 export interface CartItem extends Product {
   cartId: string;
   selectedOptions: Record<string, Option[]>;
@@ -67,10 +72,9 @@ export interface Order {
   total: number;
   status: OrderStatus;
   createdAt: any;
-  
   paymentMethod: string;
   deliveryMethod: string;
   shippingPrice?: number;
   address?: any;
-  isPaid?: boolean; // Novo campo
+  isPaid?: boolean; 
 }

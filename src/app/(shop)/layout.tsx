@@ -2,20 +2,20 @@
 "use client";
 
 import { CartProvider } from "@/context/CartContext";
-import TopBar from "@/components/TopBar"; // <--- Importamos a nova Barra Superior
+import TopBar from "@/components/TopBar"; 
+import CustomerNav from "@/components/CustomerNav"; // <--- NOVO MENU
 
 export default function ShopLayout({ children }: { children: React.ReactNode }) {
   return (
     <CartProvider>
       <div className="bg-gray-50 min-h-screen flex flex-col">
-        {/* A TopBar agora cuida de tudo: 
-           - Botão do Menu (Sidebar)
-           - Logo
-           - Ícone do Carrinho com contador
-        */}
+        {/* Barra do Topo (Logo, Login, Carrinho) */}
         <TopBar />
+        
+        {/* Navegação entre Áreas (Delivery / Encomendas / Eventos) */}
+        <CustomerNav />
 
-        {/* Conteúdo das páginas (Home, Perfil, etc) */}
+        {/* Conteúdo das páginas */}
         <main className="container mx-auto px-4 py-6 flex-grow">
           {children}
         </main>

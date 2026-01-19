@@ -3,8 +3,8 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Save, Upload, Box, Layers, Loader2 } from "lucide-react";
-import { Product, ComplementGroup } from "@/types";
+import { ArrowLeft, Save, Upload, Box, Layers, Loader2, Store } from "lucide-react";
+import { Product, ComplementGroup, SalesChannel } from "@/types";
 import { createProduct } from "@/services/productService";
 import { getAllGroups, createGroup } from "@/services/complementService";
 import { uploadImage } from "@/services/uploadService"; // Usa o ImgBB
@@ -24,29 +24,27 @@ export default function NewProductPage() {
     basePrice: 0, pricePostpaid: 0, 
     imageUrl: "", category: "bolos", 
     isAvailable: true, availableStandard: true, availablePostpaid: true,
-    stock: null, complementGroupIds: []
+    stock: null, complementGroupIds: [],
+    salesChannel: 'delivery' // Padrão
   });
 
   useEffect(() => {
     getAllGroups().then(setAllMasterGroups).catch(console.error);
   }, []);
 
-  // --- LÓGICA DE UPLOAD (ImgBB) ---
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     if (!file.type.startsWith("image/")) return alert("Apenas imagens são permitidas.");
     if (file.size > 10 * 1024 * 1024) return alert("A imagem deve ter menos de 10MB.");
 
     try {
         setUploading(true);
-        // Chama o serviço do ImgBB
         const url = await uploadImage(file);
         setFormData(prev => ({ ...prev, imageUrl: url }));
     } catch (error) {
         console.error(error);
-        alert("Erro ao enviar imagem. Verifique a API Key do ImgBB no arquivo services/uploadService.ts");
+        alert("Erro ao enviar imagem.");
     } finally {
         setUploading(false);
     }
@@ -69,15 +67,12 @@ export default function NewProductPage() {
         availableStandard: formData.availableStandard ?? true,
         availablePostpaid: formData.availablePostpaid ?? true,
         stock: manageStock ? (Number(formData.stock) || 0) : null,
-        complementGroupIds: formData.complementGroupIds || []
+        complementGroupIds: formData.complementGroupIds || [],
+        salesChannel: formData.salesChannel || 'delivery'
       };
 
-      await Promise.race([
-        createProduct(payload),
-        new Promise((resolve) => setTimeout(resolve, 3000))
-      ]);
-      
-      window.location.href = "/admin"; 
+      await createProduct(payload);
+      router.push("/admin"); 
 
     } catch (error) {
       console.error(error);
@@ -109,6 +104,27 @@ export default function NewProductPage() {
                 <h2 className="font-bold border-b pb-2">Dados</h2>
                 <input placeholder="Nome do Produto" required className="w-full p-3 border rounded" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})}/>
                 
+                {/* SELETOR DE CANAL (NOVO) */}
+                <div className="bg-blue-50 p-4 rounded border border-blue-200">
+                    <label className="text-sm font-bold text-blue-800 flex items-center gap-2 mb-2"><Store size={16}/> Onde exibir este produto?</label>
+                    <div className="grid grid-cols-3 gap-2">
+                        {[
+                            {id: 'delivery', label: 'Delivery (Carrinho)'}, 
+                            {id: 'encomenda', label: 'Sob Encomenda (Vitrine)'}, 
+                            {id: 'evento', label: 'Eventos (Vitrine)'}
+                        ].map(opt => (
+                            <button type="button" key={opt.id} onClick={() => setFormData({...formData, salesChannel: opt.id as SalesChannel})} className={`py-2 px-1 text-xs font-bold rounded border ${formData.salesChannel === opt.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300'}`}>
+                                {opt.label}
+                            </button>
+                        ))}
+                    </div>
+                    <p className="text-[10px] text-blue-600 mt-2">
+                        {formData.salesChannel === 'delivery' && "Aparece na tela inicial. Cliente pode comprar na hora."}
+                        {formData.salesChannel === 'encomenda' && "Aparece na aba Encomendas. Botão leva para o WhatsApp."}
+                        {formData.salesChannel === 'evento' && "Aparece na aba Datas Especiais. Botão leva para o WhatsApp."}
+                    </p>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded border">
                     <div>
                         <label className="text-xs font-bold text-green-700 uppercase mb-1 block">R$ À Vista</label>
@@ -125,44 +141,38 @@ export default function NewProductPage() {
                 </div>
                 <textarea rows={3} placeholder="Descrição" className="w-full p-3 border rounded" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})}/>
                 
-                <div className="bg-white border p-4 rounded flex flex-col gap-2">
-                    <span className="text-sm font-bold flex items-center gap-2 text-gray-700">Quem pode ver?</span>
-                    <div className="flex gap-6">
-                        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-                            <input type="checkbox" className="w-4 h-4 text-green-600 rounded" checked={formData.availableStandard} onChange={e => setFormData({...formData, availableStandard: e.target.checked})} /> Padrão
-                        </label>
-                        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-                            <input type="checkbox" className="w-4 h-4 text-purple-600 rounded" checked={formData.availablePostpaid} onChange={e => setFormData({...formData, availablePostpaid: e.target.checked})} /> Mensalista
-                        </label>
+                {/* Se for Delivery, mostra opções de Estoque */}
+                {formData.salesChannel === 'delivery' && (
+                    <div className="bg-gray-50 p-4 rounded border flex items-center justify-between">
+                        <label className="flex items-center gap-2 text-sm font-bold"><Box size={16}/> Controlar Estoque?</label>
+                        <div className="flex items-center gap-4">
+                            <input type="checkbox" className="w-5 h-5" checked={manageStock} onChange={e => setManageStock(e.target.checked)}/>
+                            {manageStock && <input type="number" className="w-20 p-2 border rounded" value={formData.stock ?? 0} onChange={e => setFormData({...formData, stock: parseInt(e.target.value)})}/>}
+                        </div>
                     </div>
-                </div>
-
-                <div className="bg-gray-50 p-4 rounded border flex items-center justify-between">
-                    <label className="flex items-center gap-2 text-sm font-bold"><Box size={16}/> Controlar Estoque?</label>
-                    <div className="flex items-center gap-4">
-                        <input type="checkbox" className="w-5 h-5" checked={manageStock} onChange={e => setManageStock(e.target.checked)}/>
-                        {manageStock && <input type="number" className="w-20 p-2 border rounded" value={formData.stock ?? 0} onChange={e => setFormData({...formData, stock: parseInt(e.target.value)})}/>}
-                    </div>
-                </div>
+                )}
             </section>
 
-            <section className="bg-white p-6 rounded border">
-                <div className="flex justify-between mb-4"><h2 className="font-bold flex gap-2"><Layers/> Complementos</h2><button type="button" onClick={quickGroup} className="text-pink-600 font-bold text-sm">+ Criar Rápido</button></div>
-                {allMasterGroups.length === 0 ? <p className="text-gray-400 text-center">Sem grupos.</p> : 
-                    <div className="grid md:grid-cols-2 gap-3">
-                        {allMasterGroups.map(g => {
-                            const sel = formData.complementGroupIds?.includes(g.id);
-                            return <div key={g.id} onClick={() => {
-                                const curr = formData.complementGroupIds || [];
-                                setFormData({...formData, complementGroupIds: sel ? curr.filter(i => i !== g.id) : [...curr, g.id]});
-                            }} className={`p-3 border rounded cursor-pointer flex gap-3 items-center ${sel ? 'border-pink-500 bg-pink-50' : ''}`}>
-                                <div className={`w-4 h-4 border rounded flex items-center justify-center ${sel ? 'bg-pink-600 border-pink-600 text-white' : 'bg-white'}`}>{sel && "✓"}</div>
-                                <div className="flex-1"><div className="font-bold text-sm">{g.title}</div></div>
-                            </div>
-                        })}
-                    </div>
-                }
-            </section>
+            {/* Complementos apenas para Delivery */}
+            {formData.salesChannel === 'delivery' && (
+                <section className="bg-white p-6 rounded border">
+                    <div className="flex justify-between mb-4"><h2 className="font-bold flex gap-2"><Layers/> Complementos</h2><button type="button" onClick={quickGroup} className="text-pink-600 font-bold text-sm">+ Criar Rápido</button></div>
+                    {allMasterGroups.length === 0 ? <p className="text-gray-400 text-center">Sem grupos.</p> : 
+                        <div className="grid md:grid-cols-2 gap-3">
+                            {allMasterGroups.map(g => {
+                                const sel = formData.complementGroupIds?.includes(g.id);
+                                return <div key={g.id} onClick={() => {
+                                    const curr = formData.complementGroupIds || [];
+                                    setFormData({...formData, complementGroupIds: sel ? curr.filter(i => i !== g.id) : [...curr, g.id]});
+                                }} className={`p-3 border rounded cursor-pointer flex gap-3 items-center ${sel ? 'border-pink-500 bg-pink-50' : ''}`}>
+                                    <div className={`w-4 h-4 border rounded flex items-center justify-center ${sel ? 'bg-pink-600 border-pink-600 text-white' : 'bg-white'}`}>{sel && "✓"}</div>
+                                    <div className="flex-1"><div className="font-bold text-sm">{g.title}</div></div>
+                                </div>
+                            })}
+                        </div>
+                    }
+                </section>
+            )}
         </div>
 
         {/* DIREITA - UPLOAD DE IMAGEM */}

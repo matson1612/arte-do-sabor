@@ -2,13 +2,16 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { CartItem } from "@/types"; // Importa o tipo correto global
+import { CartItem } from "@/types";
+
+// Tipo auxiliar para o item que VEM da loja (sem ID de carrinho ainda)
+type CartEntry = Omit<CartItem, 'cartId' | 'quantity' | 'finalPrice'>;
 
 interface CartContextType {
   items: CartItem[];
-  addToCart: (item: CartItem, quantity: number) => void;
+  addToCart: (item: CartEntry, quantity: number) => void; // <--- CORRIGIDO AQUI
   removeFromCart: (cartId: string) => void;
-  updateQuantity: (cartId: string, newQuantity: number) => void; // <--- AGORA EXISTE
+  updateQuantity: (cartId: string, newQuantity: number) => void;
   clearCart: () => void;
   cartTotal: number;
   cartCount: number;
@@ -20,28 +23,28 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // Carrega do localStorage
+  // 1. Carrega do localStorage ao iniciar
   useEffect(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("cart_storage");
       if (saved) {
         try { setItems(JSON.parse(saved)); } 
-        catch (e) { console.error("Erro no carrinho", e); }
+        catch (e) { console.error("Erro ao carregar carrinho", e); }
       }
       setIsInitialized(true);
     }
   }, []);
 
-  // Salva no localStorage
+  // 2. Salva no localStorage sempre que muda
   useEffect(() => {
     if (isInitialized) {
       localStorage.setItem("cart_storage", JSON.stringify(items));
     }
   }, [items, isInitialized]);
 
-  const addToCart = (newItem: CartItem, quantity: number) => {
+  const addToCart = (newItem: CartEntry, quantity: number) => {
     setItems((prev) => {
-      // Procura item idêntico (mesmo produto E mesmas opções)
+      // Verifica se já existe um item igual (mesmo ID de produto e mesmas opções)
       const existingIdx = prev.findIndex((i) => 
         i.id === newItem.id && 
         JSON.stringify(i.selectedOptions) === JSON.stringify(newItem.selectedOptions)
@@ -50,16 +53,23 @@ export function CartProvider({ children }: { children: ReactNode }) {
       if (existingIdx >= 0) {
         const updated = [...prev];
         updated[existingIdx].quantity += quantity;
-        // Atualiza preço final também
-        updated[existingIdx].finalPrice = updated[existingIdx].price! * updated[existingIdx].quantity;
+        // Atualiza preço final
+        updated[existingIdx].finalPrice = (updated[existingIdx].price || 0) * updated[existingIdx].quantity;
         return updated;
       }
       
-      return [...prev, { ...newItem, quantity, cartId: crypto.randomUUID() }];
+      // Cria o item completo com ID único de carrinho
+      const fullItem: CartItem = {
+          ...newItem,
+          quantity,
+          cartId: crypto.randomUUID(),
+          finalPrice: (newItem.price || 0) * quantity
+      } as CartItem;
+
+      return [...prev, fullItem];
     });
   };
 
-  // Função que faltava
   const updateQuantity = (cartId: string, newQuantity: number) => {
       if (newQuantity < 1) return;
       setItems(prev => prev.map(item => {
