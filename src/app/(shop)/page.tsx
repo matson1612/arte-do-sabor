@@ -6,10 +6,9 @@ import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
-// CORREÇÃO AQUI: Adicionado "Minus"
 import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X, CheckSquare, MessageSquare, ArrowRight } from "lucide-react";
 import { Product, ComplementGroup, Option } from "@/types";
-import HeroCarousel from "@/components/HeroCarousel"; 
+import HeroCarousel from "@/components/HeroCarousel";
 
 export default function ShopHome() {
   const { addToCart } = useCart();
@@ -17,20 +16,29 @@ export default function ShopHome() {
   
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [observation, setObservation] = useState("");
   const [selectedOptions, setSelectedOptions] = useState<Record<string, Option[]>>({});
 
+  // --- LÓGICA DE PREÇOS ATUALIZADA ---
   const getPrice = (item: Product) => {
+    // 1. Revendedor
+    if (profile?.clientType === 'reseller' && item.priceReseller && item.priceReseller > 0) {
+        return item.priceReseller;
+    }
+    // 2. Mensalista
     if (profile?.clientType === 'monthly' && item.pricePostpaid && item.pricePostpaid > 0) {
         return item.pricePostpaid;
     }
+    // 3. Padrão
     return item.basePrice || 0;
   };
 
   const getOptionPrice = (opt: Option) => {
+      if (profile?.clientType === 'reseller' && opt.priceAddReseller !== undefined) {
+          return opt.priceAddReseller;
+      }
       if (profile?.clientType === 'monthly' && opt.priceAddPostpaid !== undefined) {
           return opt.priceAddPostpaid;
       }
@@ -56,12 +64,7 @@ export default function ShopHome() {
           const groupIds = data.complementGroupIds || [];
           const loadedGroups = groupIds.map((id: string) => groupsMap[id]).filter(Boolean);
 
-          return { 
-              id: doc.id, 
-              ...data, 
-              salesChannel: channel, 
-              fullGroups: loadedGroups 
-          } as unknown as Product;
+          return { id: doc.id, ...data, salesChannel: channel, fullGroups: loadedGroups } as unknown as Product;
         });
 
         setProducts(items);
@@ -73,6 +76,8 @@ export default function ShopHome() {
   const visibleProducts = products.filter(p => {
       if (p.salesChannel === 'encomenda' || p.salesChannel === 'evento') return false;
       if (!p.isAvailable) return false;
+      
+      if (profile?.clientType === 'reseller') return p.availableReseller !== false;
       if (profile?.clientType === 'monthly') return p.availablePostpaid !== false;
       return p.availableStandard !== false;
   });
@@ -84,6 +89,7 @@ export default function ShopHome() {
     return acc;
   }, {} as Record<string, Product[]>);
 
+  // ... (Funções Modal e AddToCart mantidas iguais) ...
   const openModal = (product: Product) => {
     if (product.stock !== null && product.stock <= 0) return;
     setSelectedProduct(product);
@@ -121,18 +127,10 @@ export default function ShopHome() {
 
     let customName = selectedProduct.name;
     const allSelectedOpts = Object.values(selectedOptions).flat();
-    if (allSelectedOpts.length > 0) {
-        const optNames = allSelectedOpts.map(o => o.name).join(', ');
-        customName += ` (+ ${optNames})`;
-    }
+    if (allSelectedOpts.length > 0) { const optNames = allSelectedOpts.map(o => o.name).join(', '); customName += ` (+ ${optNames})`; }
     if (observation.trim()) customName += ` [Obs: ${observation}]`;
 
-    addToCart({
-        ...selectedProduct,
-        name: customName,
-        price: calculateTotal() / quantity,
-        selectedOptions: selectedOptions 
-    }, quantity);
+    addToCart({ ...selectedProduct, name: customName, price: calculateTotal() / quantity, selectedOptions: selectedOptions }, quantity);
     setSelectedProduct(null);
   };
 
@@ -140,61 +138,23 @@ export default function ShopHome() {
 
   return (
     <div className="space-y-10 pb-24">
-      
-      {/* 1. CARROSSEL DE DESTAQUES */}
-      <HeroCarousel products={visibleProducts} />
-
+      <HeroCarousel products={products} />
       {visibleProducts.length === 0 ? (
-        <div className="text-center text-stone-400 py-20 flex flex-col items-center">
-            <ShoppingBag size={48} className="mb-4 opacity-20"/>
-            <p>Nenhuma delícia disponível agora.</p>
-        </div>
+        <div className="text-center text-stone-400 py-20"><ShoppingBag size={48} className="mx-auto mb-4 opacity-20"/><p>Nenhuma delícia disponível agora.</p></div>
       ) : (
         Object.entries(groupedProducts).map(([category, items]) => (
           <section key={category}>
-            
-            {/* Título da Categoria */}
-            <div className="flex items-center gap-4 mb-6">
-                <h3 className="text-2xl font-bold text-stone-800 capitalize tracking-tight">{category}</h3>
-                <div className="h-[1px] flex-1 bg-stone-200"></div>
-            </div>
-
+            <div className="flex items-center gap-4 mb-6"><h3 className="text-2xl font-bold text-stone-800 capitalize tracking-tight">{category}</h3><div className="h-[1px] flex-1 bg-stone-200"></div></div>
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {items.map((product) => {
                 const isOutOfStock = product.stock !== null && product.stock <= 0;
-                
                 return (
-                  <div 
-                      key={product.id} 
-                      onClick={() => openModal(product)} 
-                      className={`group bg-white rounded-3xl p-3 shadow-[0_2px_15px_-3px_rgba(0,0,0,0.07),0_10px_20px_-2px_rgba(0,0,0,0.04)] hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border border-stone-50 relative overflow-hidden flex gap-4 cursor-pointer ${isOutOfStock ? 'opacity-60 grayscale' : ''}`}
-                  >
+                  <div key={product.id} onClick={() => openModal(product)} className={`group bg-white rounded-3xl p-3 shadow-[0_2px_15px_-3px_rgba(0,0,0,0.07),0_10px_20px_-2px_rgba(0,0,0,0.04)] hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border border-stone-50 relative overflow-hidden flex gap-4 cursor-pointer ${isOutOfStock ? 'opacity-60 grayscale' : ''}`}>
                     {isOutOfStock && <div className="absolute inset-0 z-20 bg-stone-100/50 backdrop-blur-[1px] flex items-center justify-center"><span className="bg-stone-800 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest">Esgotado</span></div>}
-                    
-                    {/* Imagem */}
-                    <div className="w-28 h-28 rounded-2xl overflow-hidden flex-shrink-0 bg-stone-100 relative shadow-inner">
-                        {product.imageUrl ? <img src={product.imageUrl} className="w-full h-full object-cover group-hover:scale-110 transition duration-500" /> : <ImageOff className="m-auto mt-10 text-stone-300" size={24} />}
-                    </div>
-
-                    {/* Info */}
+                    <div className="w-28 h-28 rounded-2xl overflow-hidden flex-shrink-0 bg-stone-100 relative shadow-inner">{product.imageUrl ? <img src={product.imageUrl} className="w-full h-full object-cover group-hover:scale-110 transition duration-500" /> : <ImageOff className="m-auto mt-10 text-stone-300" size={24} />}</div>
                     <div className="flex-1 flex flex-col justify-between py-1">
-                        <div>
-                            <h4 className="font-bold text-stone-800 text-lg leading-tight line-clamp-2 mb-1">{product.name}</h4>
-                            <p className="text-xs text-stone-500 line-clamp-2 leading-relaxed">{product.description}</p>
-                        </div>
-                        
-                        <div className="flex justify-between items-end mt-2">
-                            <div className="flex flex-col">
-                                <span className="text-[10px] text-stone-400 font-bold uppercase">A partir de</span>
-                                <span className="font-bold text-lg text-emerald-600">{getPrice(product).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                            </div>
-                            
-                            {!isOutOfStock && (
-                                <button className="bg-stone-900 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:bg-pink-600 transition-colors">
-                                    <Plus size={16} />
-                                </button>
-                            )}
-                        </div>
+                        <div><h4 className="font-bold text-stone-800 text-lg leading-tight line-clamp-2 mb-1">{product.name}</h4><p className="text-xs text-stone-500 line-clamp-2 leading-relaxed">{product.description}</p></div>
+                        <div className="flex justify-between items-end mt-2"><div className="flex flex-col"><span className="text-[10px] text-stone-400 font-bold uppercase">A partir de</span><span className="font-bold text-lg text-emerald-600">{getPrice(product).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></div>{!isOutOfStock && <button className="bg-stone-900 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:bg-pink-600 transition-colors"><Plus size={16} /></button>}</div>
                     </div>
                   </div>
                 );
@@ -203,70 +163,25 @@ export default function ShopHome() {
           </section>
         ))
       )}
-
-      {/* MODAL MODERNO */}
+      {/* Modal igual... */}
       {selectedProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 p-4 animate-in fade-in duration-300 backdrop-blur-sm">
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
             <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-8 duration-300 max-h-[90vh] overflow-y-auto flex flex-col">
-                
-                {/* Header Imagem */}
-                <div className="h-64 bg-stone-100 relative flex-shrink-0">
-                    <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-white/80 backdrop-blur text-stone-800 p-2 rounded-full hover:bg-white shadow-sm transition"><X size={20}/></button>
-                    {selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-stone-300"><ImageOff size={40}/></div>}
-                    <div className="absolute bottom-0 inset-x-0 h-20 bg-gradient-to-t from-white to-transparent"></div>
-                </div>
-
+                <div className="h-64 bg-stone-100 relative flex-shrink-0"><button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-white/80 backdrop-blur text-stone-800 p-2 rounded-full hover:bg-white shadow-sm transition"><X size={20}/></button>{selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-stone-300"><ImageOff size={40}/></div>}<div className="absolute bottom-0 inset-x-0 h-20 bg-gradient-to-t from-white to-transparent"></div></div>
                 <div className="p-6 pt-0 space-y-6 flex-1 overflow-y-auto">
-                    <div>
-                        <h2 className="text-2xl font-bold text-stone-800 mb-1">{selectedProduct.name}</h2>
-                        <p className="text-stone-500 text-sm leading-relaxed">{selectedProduct.description}</p>
-                    </div>
-
-                    {/* Grupos de Opções */}
+                    <div><h2 className="text-2xl font-bold text-stone-800 mb-1">{selectedProduct.name}</h2><p className="text-stone-500 text-sm leading-relaxed">{selectedProduct.description}</p></div>
                     {selectedProduct.fullGroups?.map(group => (
                         <div key={group.id} className="space-y-3">
-                            <div className="flex justify-between items-center border-b border-stone-100 pb-2">
-                                <h3 className="font-bold text-stone-700 text-sm">{group.title}</h3>
-                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${group.required ? 'bg-rose-100 text-rose-700' : 'bg-stone-100 text-stone-500'}`}>{group.required ? 'OBRIGATÓRIO' : 'OPCIONAL'}</span>
-                            </div>
-                            <div className="space-y-2">
-                                {group.options.map(opt => {
-                                    const isSelected = selectedOptions[group.id]?.some(o => o.id === opt.id);
-                                    const optOutOfStock = opt.stock !== null && opt.stock <= 0;
-                                    return (
-                                        <div key={opt.id} onClick={() => !optOutOfStock && toggleOption(group, opt)} className={`flex justify-between items-center p-3 rounded-xl border transition-all cursor-pointer ${optOutOfStock ? 'opacity-50 bg-stone-50 cursor-not-allowed' : isSelected ? 'border-pink-500 bg-pink-50/30 ring-1 ring-pink-500' : 'border-stone-100 hover:border-pink-200 bg-white'}`}>
-                                            <div className="flex items-center gap-3">
-                                                <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${isSelected ? 'bg-pink-500 border-pink-500 text-white' : 'border-stone-300'}`}>{isSelected && <CheckSquare size={14}/>}</div>
-                                                <span className="text-sm font-medium text-stone-700">{opt.name} {optOutOfStock && '(Esgotado)'}</span>
-                                            </div>
-                                            {!optOutOfStock && getOptionPrice(opt) > 0 && <span className="text-xs font-bold text-emerald-600">+ R$ {getOptionPrice(opt).toFixed(2)}</span>}
-                                        </div>
-                                    )
-                                })}
-                            </div>
+                            <div className="flex justify-between items-center border-b border-stone-100 pb-2"><h3 className="font-bold text-stone-700 text-sm">{group.title}</h3><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${group.required ? 'bg-rose-100 text-rose-700' : 'bg-stone-100 text-stone-500'}`}>{group.required ? 'OBRIGATÓRIO' : 'OPCIONAL'}</span></div>
+                            <div className="space-y-2">{group.options.map(opt => { const isSelected = selectedOptions[group.id]?.some(o => o.id === opt.id); const optOutOfStock = opt.stock !== null && opt.stock <= 0; return (<div key={opt.id} onClick={() => !optOutOfStock && toggleOption(group, opt)} className={`flex justify-between items-center p-3 rounded-xl border transition-all cursor-pointer ${optOutOfStock ? 'opacity-50 bg-stone-50 cursor-not-allowed' : isSelected ? 'border-pink-500 bg-pink-50/30 ring-1 ring-pink-500' : 'border-stone-100 hover:border-pink-200 bg-white'}`}><div className="flex items-center gap-3"><div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${isSelected ? 'bg-pink-500 border-pink-500 text-white' : 'border-stone-300'}`}>{isSelected && <CheckSquare size={14}/>}</div><span className="text-sm font-medium text-stone-700">{opt.name} {optOutOfStock && '(Esgotado)'}</span></div>{!optOutOfStock && getOptionPrice(opt) > 0 && <span className="text-xs font-bold text-emerald-600">+ R$ {getOptionPrice(opt).toFixed(2)}</span>}</div>) })}</div>
                         </div>
                     ))}
-
-                    {/* Obs */}
-                    <div>
-                        <label className="font-bold text-stone-700 text-sm mb-2 flex items-center gap-2"><MessageSquare size={16}/> Alguma observação?</label>
-                        <textarea className="w-full p-3 border border-stone-200 rounded-xl bg-stone-50 focus:bg-white focus:ring-2 focus:ring-pink-100 text-sm outline-none transition" rows={2} placeholder="Ex: Tirar cebola, caprichar no molho..." value={observation} onChange={e => setObservation(e.target.value)}/>
-                    </div>
+                    <div><label className="font-bold text-stone-700 text-sm mb-2 flex items-center gap-2"><MessageSquare size={16}/> Alguma observação?</label><textarea className="w-full p-3 border border-stone-200 rounded-xl bg-stone-50 focus:bg-white focus:ring-2 focus:ring-pink-100 text-sm outline-none transition" rows={2} placeholder="Ex: Tirar cebola, caprichar no molho..." value={observation} onChange={e => setObservation(e.target.value)}/></div>
                 </div>
-
-                {/* Footer Fixo */}
                 <div className="p-4 bg-white border-t border-stone-100 flex items-center gap-4">
-                    <div className="flex items-center bg-stone-100 rounded-xl h-12 px-1">
-                        <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="w-10 h-full flex items-center justify-center hover:text-pink-600 transition"><Minus size={18}/></button>
-                        <span className="w-8 text-center font-bold text-lg text-stone-800">{quantity}</span>
-                        <button onClick={() => setQuantity(q => q + 1)} className="w-10 h-full flex items-center justify-center hover:text-pink-600 transition"><Plus size={18}/></button>
-                    </div>
-                    
-                    <button onClick={handleAddToCart} className="flex-1 bg-stone-900 text-white font-bold h-12 rounded-xl hover:bg-stone-800 flex justify-between items-center px-6 shadow-lg shadow-stone-200 transition-all active:scale-95">
-                        <span>Adicionar</span>
-                        <span className="opacity-90">{calculateTotal().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                    </button>
+                    <div className="flex items-center bg-stone-100 rounded-xl h-12 px-1"><button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="w-10 h-full flex items-center justify-center hover:text-pink-600 transition"><Minus size={18}/></button><span className="w-8 text-center font-bold text-lg text-stone-800">{quantity}</span><button onClick={() => setQuantity(q => q + 1)} className="w-10 h-full flex items-center justify-center hover:text-pink-600 transition"><Plus size={18}/></button></div>
+                    <button onClick={handleAddToCart} className="flex-1 bg-stone-900 text-white font-bold h-12 rounded-xl hover:bg-stone-800 flex justify-between items-center px-6 shadow-lg shadow-stone-200 transition-all active:scale-95"><span>Adicionar</span><span className="opacity-90">{calculateTotal().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></button>
                 </div>
             </div>
         </div>

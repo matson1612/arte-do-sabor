@@ -1,8 +1,7 @@
 // src/types/index.ts
 
-export type ClientType = 'standard' | 'monthly';
+export type ClientType = 'standard' | 'monthly' | 'reseller'; // <--- NOVO TIPO
 
-// Atualizado com todos os status que você usa
 export type OrderStatus = 'em_aberto' | 'produzindo' | 'entrega' | 'finalizado' | 'cancelado';
 export type SalesChannel = 'delivery' | 'encomenda' | 'evento';
 
@@ -11,6 +10,7 @@ export interface Option {
   name: string;
   priceAdd: number;
   priceAddPostpaid?: number; 
+  priceAddReseller?: number; // <--- NOVO PREÇO
   isAvailable: boolean;
   stock: number | null;
   linkedProductId?: string; 
@@ -30,19 +30,22 @@ export interface Product {
   description: string;
   basePrice: number;
   pricePostpaid?: number;
+  priceReseller?: number; // <--- NOVO PREÇO
   imageUrl: string;
   category: string;
   isAvailable: boolean;
+  
+  // Disponibilidade por perfil
   availableStandard?: boolean;
   availablePostpaid?: boolean;
+  availableReseller?: boolean; // <--- NOVA DISPONIBILIDADE
+
   stock: number | null;
   complementGroupIds: string[];
   
-  // Auxiliares do front
   price?: number; 
   fullGroups?: ComplementGroup[];
   
-  // Novos campos de Vitrine
   salesChannel?: SalesChannel;
   gallery?: string[];
   videoUrl?: string;
@@ -73,40 +76,16 @@ export interface Order {
   userId: string;
   userName: string;
   userPhone: string;
-  items: string; // JSON string
+  items: string;
   total: number;
   status: OrderStatus;
   createdAt: any;
-  
-  // Campos obrigatórios para o Admin e Boleta
   paymentMethod: string;
   deliveryMethod: string;
   shippingPrice?: number;
   address?: any;
-  
-  // CORREÇÃO: Campo essencial para mensalistas
   isPaid?: boolean;
-
   isManual?: boolean;
-  contractUrl?: string; // Link do contrato/foto
-  description?: string; // Descrição extra (ex: "Troca por Abacaxi")
-}
-
-export interface StoreSettings {
-  id?: string; 
-  storeName: string;
-  cnpj: string;
-  phone: string;
-  address: {
-    street: string;
-    number: string;
-    district: string;
-    city: string;
-    state: string;
-  };
-  location: {
-    lat: number;
-    lng: number;
-  };
-  authorizedEmail: string;
+  contractUrl?: string;
+  description?: string;
 }
