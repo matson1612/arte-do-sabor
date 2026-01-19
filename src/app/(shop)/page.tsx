@@ -6,7 +6,7 @@ import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
-import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X, CheckSquare, MessageSquare, ArrowRight } from "lucide-react";
+import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X, CheckSquare, MessageSquare, ArrowRight, AlertCircle } from "lucide-react";
 import { Product, ComplementGroup, Option, Category } from "@/types";
 import HeroCarousel from "@/components/HeroCarousel";
 
@@ -109,9 +109,9 @@ export default function ShopHome() {
       { id: 'uncategorized', name: 'Geral', order: 999 }
   ].filter(c => groupedProducts[c.id] && groupedProducts[c.id].length > 0);
 
-  // --- FUNÇÃO DO MODAL ---
+  // --- LÓGICA DO MODAL ---
   const openModal = (product: Product) => {
-    // Permite abrir modal mesmo sem estoque para ver detalhes, mas bloqueia adição
+    // CORREÇÃO: Agora permite abrir mesmo se estoque for 0, apenas para visualizar
     setSelectedProduct(product);
     setQuantity(1);
     setObservation("");
@@ -142,8 +142,10 @@ export default function ShopHome() {
 
   const handleAddToCart = () => {
     if (!selectedProduct) return;
-    if (selectedProduct.stock !== null && selectedProduct.stock <= 0) return alert("Produto esgotado.");
     
+    // Bloqueio extra de segurança
+    if (selectedProduct.stock !== null && selectedProduct.stock <= 0) return alert("Produto esgotado.");
+
     const missingRequired = selectedProduct.fullGroups?.find(g => g.required && (!selectedOptions[g.id] || selectedOptions[g.id].length === 0));
     if (missingRequired) return alert(`Grupo "${missingRequired.title}" é obrigatório.`);
 
@@ -160,11 +162,7 @@ export default function ShopHome() {
 
   return (
     <div className="space-y-10 pb-24">
-      {/* 1. CARROSSEL COM LINK PARA MODAL */}
-      <HeroCarousel 
-        products={products} // Passa todos os produtos para filtrar os destaques
-        onProductClick={openModal} // <--- PASSA A FUNÇÃO AQUI
-      />
+      <HeroCarousel products={products} onProductClick={openModal} />
       
       {visibleProducts.length === 0 ? (
         <div className="text-center text-stone-400 py-20"><ShoppingBag size={48} className="mx-auto mb-4 opacity-20"/><p>Nenhuma delícia disponível agora.</p></div>
@@ -199,24 +197,89 @@ export default function ShopHome() {
         })
       )}
       
+      {/* --- MODAL AJUSTADO --- */}
       {selectedProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 p-4 animate-in fade-in duration-300 backdrop-blur-sm">
+        // z-[60]: Garante que fique acima do Header (z-50)
+        // pt-24 items-start: Empurra o card para baixo (abaixo do menu de 80px) em vez de centralizar no meio da tela e ser cortado
+        <div className="fixed inset-0 z-[60] flex items-start justify-center bg-stone-900/60 p-4 pt-24 animate-in fade-in duration-300 backdrop-blur-sm">
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
-            <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-8 duration-300 max-h-[90vh] overflow-y-auto flex flex-col">
-                <div className="h-64 bg-stone-100 relative flex-shrink-0"><button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-white/80 backdrop-blur text-stone-800 p-2 rounded-full hover:bg-white shadow-sm transition"><X size={20}/></button>{selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-stone-300"><ImageOff size={40}/></div>}<div className="absolute bottom-0 inset-x-0 h-20 bg-gradient-to-t from-white to-transparent"></div></div>
+            
+            {/* max-h-[calc(100vh-120px)]: Garante que o modal não extrapole a tela para baixo também */}
+            <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-8 duration-300 max-h-[calc(100vh-120px)] overflow-y-auto flex flex-col">
+                
+                {/* Imagem do Produto */}
+                <div className="h-64 bg-stone-100 relative flex-shrink-0">
+                    <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-white/80 backdrop-blur text-stone-800 p-2 rounded-full hover:bg-white shadow-sm transition"><X size={20}/></button>
+                    {selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-stone-300"><ImageOff size={40}/></div>}
+                    
+                    {/* Alerta Visual de Esgotado no Modal */}
+                    {selectedProduct.stock !== null && selectedProduct.stock <= 0 && (
+                        <div className="absolute inset-0 bg-stone-900/50 backdrop-blur-[2px] flex items-center justify-center z-10">
+                            <span className="bg-red-500 text-white px-4 py-2 rounded-full font-bold uppercase shadow-lg flex items-center gap-2">
+                                <AlertCircle size={20}/> Produto Esgotado
+                            </span>
+                        </div>
+                    )}
+                    
+                    <div className="absolute bottom-0 inset-x-0 h-20 bg-gradient-to-t from-white to-transparent"></div>
+                </div>
+
                 <div className="p-6 pt-0 space-y-6 flex-1 overflow-y-auto">
-                    <div><h2 className="text-2xl font-bold text-stone-800 mb-1">{selectedProduct.name}</h2><p className="text-stone-500 text-sm leading-relaxed">{selectedProduct.description}</p></div>
+                    <div>
+                        <h2 className="text-2xl font-bold text-stone-800 mb-1">{selectedProduct.name}</h2>
+                        <p className="text-stone-500 text-sm leading-relaxed">{selectedProduct.description}</p>
+                    </div>
+
+                    {/* Complementos */}
                     {selectedProduct.fullGroups?.map(group => (
                         <div key={group.id} className="space-y-3">
                             <div className="flex justify-between items-center border-b border-stone-100 pb-2"><h3 className="font-bold text-stone-700 text-sm">{group.title}</h3><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${group.required ? 'bg-rose-100 text-rose-700' : 'bg-stone-100 text-stone-500'}`}>{group.required ? 'OBRIGATÓRIO' : 'OPCIONAL'}</span></div>
-                            <div className="space-y-2">{group.options.map(opt => { const isSelected = selectedOptions[group.id]?.some(o => o.id === opt.id); const optOutOfStock = opt.stock !== null && opt.stock <= 0; return (<div key={opt.id} onClick={() => !optOutOfStock && toggleOption(group, opt)} className={`flex justify-between items-center p-3 rounded-xl border transition-all cursor-pointer ${optOutOfStock ? 'opacity-50 bg-stone-50 cursor-not-allowed' : isSelected ? 'border-pink-500 bg-pink-50/30 ring-1 ring-pink-500' : 'border-stone-100 hover:border-pink-200 bg-white'}`}><div className="flex items-center gap-3"><div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${isSelected ? 'bg-pink-500 border-pink-500 text-white' : 'border-stone-300'}`}>{isSelected && <CheckSquare size={14}/>}</div><span className="text-sm font-medium text-stone-700">{opt.name} {optOutOfStock && '(Esgotado)'}</span></div>{!optOutOfStock && getOptionPrice(opt) > 0 && <span className="text-xs font-bold text-emerald-600">+ R$ {getOptionPrice(opt).toFixed(2)}</span>}</div>) })}</div>
+                            <div className="space-y-2">{group.options.map(opt => { 
+                                const isSelected = selectedOptions[group.id]?.some(o => o.id === opt.id); 
+                                const optOutOfStock = opt.stock !== null && opt.stock <= 0; 
+                                return (
+                                    <div key={opt.id} onClick={() => !optOutOfStock && toggleOption(group, opt)} className={`flex justify-between items-center p-3 rounded-xl border transition-all cursor-pointer ${optOutOfStock ? 'opacity-50 bg-stone-50 cursor-not-allowed' : isSelected ? 'border-pink-500 bg-pink-50/30 ring-1 ring-pink-500' : 'border-stone-100 hover:border-pink-200 bg-white'}`}>
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${isSelected ? 'bg-pink-500 border-pink-500 text-white' : 'border-stone-300'}`}>{isSelected && <CheckSquare size={14}/>}</div>
+                                            <span className="text-sm font-medium text-stone-700">{opt.name} {optOutOfStock && '(Esgotado)'}</span>
+                                        </div>
+                                        {!optOutOfStock && getOptionPrice(opt) > 0 && <span className="text-xs font-bold text-emerald-600">+ R$ {getOptionPrice(opt).toFixed(2)}</span>}
+                                    </div>
+                                ) 
+                            })}</div>
                         </div>
                     ))}
                     <div><label className="font-bold text-stone-700 text-sm mb-2 flex items-center gap-2"><MessageSquare size={16}/> Alguma observação?</label><textarea className="w-full p-3 border border-stone-200 rounded-xl bg-stone-50 focus:bg-white focus:ring-2 focus:ring-pink-100 text-sm outline-none transition" rows={2} placeholder="Ex: Tirar cebola, caprichar no molho..." value={observation} onChange={e => setObservation(e.target.value)}/></div>
                 </div>
+
+                {/* Footer Fixo */}
                 <div className="p-4 bg-white border-t border-stone-100 flex items-center gap-4">
-                    <div className="flex items-center bg-stone-100 rounded-xl h-12 px-1"><button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="w-10 h-full flex items-center justify-center hover:text-pink-600 transition"><Minus size={18}/></button><span className="w-8 text-center font-bold text-lg text-stone-800">{quantity}</span><button onClick={() => setQuantity(q => q + 1)} className="w-10 h-full flex items-center justify-center hover:text-pink-600 transition"><Plus size={18}/></button></div>
-                    <button onClick={handleAddToCart} className="flex-1 bg-stone-900 text-white font-bold h-12 rounded-xl hover:bg-stone-800 flex justify-between items-center px-6 shadow-lg shadow-stone-200 transition-all active:scale-95"><span>Adicionar</span><span className="opacity-90">{calculateTotal().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></button>
+                    {/* Variável auxiliar para checar estoque */}
+                    {(() => {
+                        const isOutOfStock = selectedProduct.stock !== null && selectedProduct.stock <= 0;
+                        return (
+                            <>
+                                <div className={`flex items-center bg-stone-100 rounded-xl h-12 px-1 ${isOutOfStock ? 'opacity-50 pointer-events-none' : ''}`}>
+                                    <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="w-10 h-full flex items-center justify-center hover:text-pink-600 transition"><Minus size={18}/></button>
+                                    <span className="w-8 text-center font-bold text-lg text-stone-800">{quantity}</span>
+                                    <button onClick={() => setQuantity(q => q + 1)} className="w-10 h-full flex items-center justify-center hover:text-pink-600 transition"><Plus size={18}/></button>
+                                </div>
+                                
+                                <button 
+                                    onClick={handleAddToCart} 
+                                    disabled={isOutOfStock}
+                                    className={`flex-1 font-bold h-12 rounded-xl flex justify-between items-center px-6 shadow-lg transition-all active:scale-95 ${
+                                        isOutOfStock 
+                                        ? 'bg-stone-300 text-stone-500 cursor-not-allowed shadow-none' 
+                                        : 'bg-stone-900 text-white hover:bg-stone-800 shadow-stone-200'
+                                    }`}
+                                >
+                                    <span>{isOutOfStock ? 'Produto Esgotado' : 'Adicionar'}</span>
+                                    {!isOutOfStock && <span className="opacity-90">{calculateTotal().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>}
+                                </button>
+                            </>
+                        );
+                    })()}
                 </div>
             </div>
         </div>
