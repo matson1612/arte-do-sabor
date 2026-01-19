@@ -2,8 +2,6 @@
 
 export type ClientType = 'standard' | 'monthly';
 export type OrderStatus = 'em_aberto' | 'produzindo' | 'entrega' | 'finalizado' | 'cancelado';
-
-// NOVO: Canal de Venda (Onde o produto aparece?)
 export type SalesChannel = 'delivery' | 'encomenda' | 'evento';
 
 export interface Option {
@@ -30,7 +28,7 @@ export interface Product {
   description: string;
   basePrice: number;
   pricePostpaid?: number;
-  imageUrl: string;
+  imageUrl: string; // Foto Principal (Capa)
   category: string;
   isAvailable: boolean;
   availableStandard?: boolean;
@@ -39,9 +37,11 @@ export interface Product {
   complementGroupIds: string[];
   price?: number;
   fullGroups?: ComplementGroup[];
+  salesChannel?: SalesChannel;
   
-  // NOVO CAMPO
-  salesChannel?: SalesChannel; 
+  // NOVOS CAMPOS PARA VITRINE
+  gallery?: string[]; // Lista de URLs de fotos extras
+  videoUrl?: string;  // Link do YouTube/Instagram/TikTok
 }
 
 export interface CartItem extends Product {
@@ -68,7 +68,7 @@ export interface Order {
   userId: string;
   userName: string;
   userPhone: string;
-  items: string; // JSON
+  items: string;
   total: number;
   status: OrderStatus;
   createdAt: any;
@@ -76,5 +76,5 @@ export interface Order {
   deliveryMethod: string;
   shippingPrice?: number;
   address?: any;
-  isPaid?: boolean; 
+  isPaid?: boolean;
 }
