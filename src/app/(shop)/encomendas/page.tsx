@@ -6,6 +6,7 @@ import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { Loader2, ImageOff, MessageCircle, X, PlayCircle, ImageIcon } from "lucide-react";
 import { Product } from "@/types";
+import ProductCardCarousel from "@/components/ProductCardCarousel";
 
 export default function EncomendasPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -37,75 +38,102 @@ export default function EncomendasPage() {
       setCurrentImage(product.imageUrl || "");
   };
 
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-pink-600" size={40}/></div>;
+  if (loading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-pink-500" size={40}/></div>;
 
   return (
-    <div className="space-y-6 p-4">
-      <div className="bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl p-6 text-white shadow-lg">
-        <h2 className="text-2xl font-bold mb-1">Encomendas & Personalizados 🎂</h2>
-        <p className="opacity-90 text-sm">Bolos artísticos, doces finos e tudo para sua festa. Clique para detalhes.</p>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {products.map((product) => (
-          <div key={product.id} onClick={() => openModal(product)} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex flex-col gap-3 cursor-pointer hover:shadow-md transition group">
-            <div className="h-56 bg-gray-100 rounded-lg overflow-hidden relative w-full">
-              {product.imageUrl ? <img src={product.imageUrl} className="w-full h-full object-cover group-hover:scale-105 transition duration-500" /> : <ImageOff className="m-auto mt-24 text-gray-300" size={40} />}
-              {/* Badges de Mídia */}
-              <div className="absolute bottom-2 right-2 flex gap-1">
-                  {product.gallery && product.gallery.length > 0 && <span className="bg-black/50 text-white px-2 py-1 rounded text-[10px] flex items-center gap-1 backdrop-blur-sm"><ImageIcon size={10}/> +{product.gallery.length}</span>}
-                  {product.videoUrl && <span className="bg-red-600/80 text-white px-2 py-1 rounded text-[10px] flex items-center gap-1 backdrop-blur-sm"><PlayCircle size={10}/> Vídeo</span>}
-              </div>
-            </div>
-            <div className="flex-1">
-                <h4 className="font-bold text-gray-800 text-lg">{product.name}</h4>
-                <p className="text-sm text-gray-500 mt-1 line-clamp-2">{product.description}</p>
-            </div>
-            <div className="text-purple-600 font-bold text-sm mt-2">Ver Detalhes & Orçar</div>
+    <div className="space-y-8 pb-24">
+      {/* Banner Moderno */}
+      <div className="relative rounded-3xl overflow-hidden bg-stone-900 shadow-xl shadow-stone-200 h-48 md:h-64 flex items-center justify-center text-center p-6">
+          <div className="absolute inset-0 opacity-40 bg-[url('https://images.unsplash.com/photo-1626803775151-61d756612f97?q=80&w=2070')] bg-cover bg-center"></div>
+          <div className="relative z-10 text-white max-w-xl">
+              <span className="bg-purple-500/80 text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider mb-2 inline-block backdrop-blur-sm">Sob Medida</span>
+              <h1 className="text-3xl md:text-5xl font-bold mb-2">Encomendas</h1>
+              <p className="text-stone-200 text-sm md:text-base">Bolos artísticos, doces finos e criações exclusivas para o seu momento.</p>
           </div>
-        ))}
       </div>
-      {products.length === 0 && <p className="text-center text-gray-400 py-10">Nenhuma encomenda cadastrada.</p>}
 
-      {/* MODAL VITRINE */}
-      {selectedProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 animate-in fade-in backdrop-blur-sm">
-            <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
-            <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-2xl overflow-hidden shadow-2xl relative flex flex-col md:flex-row">
-                <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-black/40 text-white p-1 rounded-full hover:bg-black/60"><X size={24}/></button>
+      {/* Grid de Produtos */}
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {products.map((product) => {
+          // Prepara lista de imagens (Capa + Galeria)
+          const allImages = [product.imageUrl, ...(product.gallery || [])].filter(Boolean);
+
+          return (
+            <div key={product.id} onClick={() => openModal(product)} className="group bg-white rounded-3xl p-3 border border-stone-50 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer flex flex-col gap-3">
+              
+              {/* Área da Imagem (Com Carrossel) */}
+              <div className="h-64 rounded-2xl overflow-hidden relative w-full bg-stone-100 shadow-inner">
+                <ProductCardCarousel images={allImages} alt={product.name} />
                 
-                {/* Lado Esquerdo: Mídia */}
-                <div className="w-full md:w-1/2 bg-black flex flex-col">
-                    <div className="flex-1 relative h-64 md:h-auto bg-black flex items-center justify-center">
-                        {currentImage ? <img src={currentImage} className="max-w-full max-h-full object-contain"/> : <ImageOff className="text-gray-600"/>}
+                {/* Badges */}
+                <div className="absolute top-3 right-3 flex flex-col gap-1 items-end">
+                    {product.videoUrl && <span className="bg-red-600/90 text-white p-1.5 rounded-full shadow-sm backdrop-blur-sm"><PlayCircle size={14}/></span>}
+                </div>
+              </div>
+
+              <div className="flex-1 px-1">
+                  <h4 className="font-bold text-stone-800 text-lg leading-tight mb-1">{product.name}</h4>
+                  <p className="text-sm text-stone-500 line-clamp-2 leading-relaxed">{product.description}</p>
+              </div>
+
+              <button onClick={(e) => { e.stopPropagation(); openWhatsApp(product); }} className="w-full bg-stone-900 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-stone-800 transition active:scale-95 shadow-lg shadow-stone-200">
+                  <MessageCircle size={18}/> Orçar no WhatsApp
+              </button>
+            </div>
+          )
+        })}
+      </div>
+      
+      {products.length === 0 && (
+          <div className="text-center py-20 text-stone-400">
+              <ImageIcon size={48} className="mx-auto mb-2 opacity-20"/>
+              <p>Nenhuma encomenda disponível no momento.</p>
+          </div>
+      )}
+
+      {/* MODAL DE DETALHES (Mantido e Refinado) */}
+      {selectedProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/80 p-4 animate-in fade-in backdrop-blur-sm">
+            <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
+            <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-3xl overflow-hidden shadow-2xl relative flex flex-col md:flex-row animate-in slide-in-from-bottom-8">
+                <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-black/40 text-white p-2 rounded-full hover:bg-black/60 transition"><X size={20}/></button>
+                
+                {/* Visualizador */}
+                <div className="w-full md:w-3/5 bg-black flex flex-col justify-center relative">
+                    <div className="flex-1 relative h-64 md:h-auto flex items-center justify-center bg-stone-900">
+                        {currentImage ? <img src={currentImage} className="max-w-full max-h-full object-contain"/> : <ImageOff className="text-stone-700"/>}
                     </div>
-                    {/* Miniaturas da Galeria */}
-                    {(selectedProduct.gallery && selectedProduct.gallery.length > 0) && (
-                        <div className="flex gap-2 p-2 overflow-x-auto bg-black/90">
-                            <button onClick={() => setCurrentImage(selectedProduct.imageUrl)} className={`w-16 h-16 flex-shrink-0 rounded border-2 overflow-hidden ${currentImage === selectedProduct.imageUrl ? 'border-purple-500' : 'border-transparent'}`}><img src={selectedProduct.imageUrl} className="w-full h-full object-cover"/></button>
-                            {selectedProduct.gallery.map((url, idx) => (
-                                <button key={idx} onClick={() => setCurrentImage(url)} className={`w-16 h-16 flex-shrink-0 rounded border-2 overflow-hidden ${currentImage === url ? 'border-purple-500' : 'border-transparent'}`}><img src={url} className="w-full h-full object-cover"/></button>
-                            ))}
-                        </div>
-                    )}
+                    {/* Thumbs */}
+                    <div className="p-4 bg-black/40 backdrop-blur-md overflow-x-auto flex gap-2 justify-center">
+                        {[selectedProduct.imageUrl, ...(selectedProduct.gallery || [])].filter(Boolean).map((url, idx) => (
+                            <button key={idx} onClick={() => setCurrentImage(url)} className={`w-14 h-14 rounded-lg border-2 overflow-hidden flex-shrink-0 transition-all ${currentImage === url ? 'border-purple-500 opacity-100 scale-110' : 'border-transparent opacity-60 hover:opacity-100'}`}>
+                                <img src={url} className="w-full h-full object-cover"/>
+                            </button>
+                        ))}
+                    </div>
                 </div>
 
-                {/* Lado Direito: Info */}
-                <div className="w-full md:w-1/2 p-6 flex flex-col bg-white overflow-y-auto">
-                    <h2 className="text-2xl font-bold text-gray-800 mb-2">{selectedProduct.name}</h2>
-                    <p className="text-gray-600 text-sm mb-6 leading-relaxed">{selectedProduct.description}</p>
+                {/* Info */}
+                <div className="w-full md:w-2/5 p-8 flex flex-col bg-white overflow-y-auto">
+                    <h2 className="text-3xl font-bold text-stone-800 mb-4 leading-tight">{selectedProduct.name}</h2>
+                    <div className="prose prose-sm text-stone-600 mb-6 flex-1">
+                        <p>{selectedProduct.description}</p>
+                    </div>
                     
                     {selectedProduct.videoUrl && (
-                        <a href={selectedProduct.videoUrl} target="_blank" rel="noopener noreferrer" className="mb-6 flex items-center gap-3 p-3 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition border border-red-100">
-                            <PlayCircle size={24}/>
-                            <div className="text-sm font-bold">Assistir Vídeo Demonstrativo</div>
+                        <a href={selectedProduct.videoUrl} target="_blank" rel="noopener noreferrer" className="mb-6 flex items-center gap-3 p-4 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition border border-red-100 group">
+                            <div className="bg-white p-2 rounded-full shadow-sm group-hover:scale-110 transition"><PlayCircle size={24}/></div>
+                            <div className="text-sm font-bold">Ver Vídeo do Produto</div>
                         </a>
                     )}
 
-                    <div className="mt-auto">
-                        <p className="text-xs text-gray-400 mb-2 text-center">Valores e personalização sob consulta.</p>
-                        <button onClick={() => openWhatsApp(selectedProduct)} className="w-full bg-green-500 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 hover:bg-green-600 transition shadow-lg shadow-green-200">
-                            <MessageCircle size={24}/> Falar com Atendente
+                    <div className="mt-auto border-t border-stone-100 pt-6">
+                        <div className="flex items-center justify-between mb-4 text-sm text-stone-500 font-medium">
+                            <span>Preço Base</span>
+                            <span className="text-xl font-bold text-stone-800">R$ {selectedProduct.basePrice.toFixed(2)}</span>
+                        </div>
+                        <button onClick={() => openWhatsApp(selectedProduct)} className="w-full bg-green-600 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 hover:bg-green-700 transition shadow-lg shadow-green-200 hover:-translate-y-1">
+                            <MessageCircle size={22}/> Solicitar Orçamento
                         </button>
                     </div>
                 </div>
