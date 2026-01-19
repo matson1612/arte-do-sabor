@@ -28,7 +28,6 @@ export default function CartPage() {
   const [paymentMethod, setPaymentMethod] = useState('pix');
   const [savedAddresses, setSavedAddresses] = useState<any[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
-  
   const [address, setAddress] = useState({ street: "", number: "", district: "", complement: "" });
   const [cepInput, setCepInput] = useState("");
   const [userLocation, setUserLocation] = useState(DEFAULT_CENTER);
@@ -57,7 +56,23 @@ export default function CartPage() {
     }
   }, [deliveryMethod, selectedRegionId, paymentMethod]);
 
-  const handleBuscaCep = async () => { /* ... (Mesmo código anterior) ... */ };
+  const handleBuscaCep = async () => { 
+      const cep = cepInput.replace(/\D/g, '');
+      if (cep.length !== 8) return alert("CEP inválido");
+      try {
+          const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+          const data = await res.json();
+          if(!data.erro) {
+              setAddress(prev => ({ ...prev, street: data.logradouro, district: data.bairro }));
+              if (window.google) {
+                  const geocoder = new window.google.maps.Geocoder();
+                  geocoder.geocode({ address: cep }, (results, status) => {
+                      if (status === 'OK' && results?.[0]) setUserLocation({ lat: results[0].geometry.location.lat(), lng: results[0].geometry.location.lng() });
+                  });
+              }
+          }
+      } catch (e) { alert("Erro CEP"); }
+  };
 
   const handleCheckout = async () => {
     if (!user) { loginGoogle(); return; }
@@ -70,10 +85,10 @@ export default function CartPage() {
 
     setIsSubmitting(true);
 
-    // VALIDAÇÃO DE ESTOQUE
+    // Validação Estoque
     try {
         for (const item of items) {
-            if (item.id) { // Produtos do banco
+            if (item.id) {
                 const prodSnap = await getDoc(doc(db, "products", item.id));
                 if (prodSnap.exists()) {
                     const stock = prodSnap.data().stock;
@@ -85,10 +100,7 @@ export default function CartPage() {
                 }
             }
         }
-    } catch (e) {
-        console.error("Erro ao validar estoque", e);
-        // Prossegue mesmo com erro de rede se quiser, ou bloqueia
-    }
+    } catch (e) { console.error(e); }
 
     const finalTotal = cartTotal + shippingPrice;
     const shortId = generateShortId(); 
@@ -106,7 +118,9 @@ export default function CartPage() {
             deliveryMethod: deliveryMethod,
             createdAt: serverTimestamp(),
             shippingPrice: shippingPrice,
-            address: deliveryMethod === 'delivery' ? (selectedAddr || address) : null
+            address: deliveryMethod === 'delivery' ? (selectedAddr || address) : null,
+            // NOVO CAMPO: Todo pedido começa como não pago
+            isPaid: false 
         });
     } catch (error) {
         alert("Erro ao processar pedido.");
@@ -114,7 +128,6 @@ export default function CartPage() {
         return;
     }
 
-    // WHATSAPP
     let msg = `*PEDIDO #${shortId} - ${profile?.name || user.displayName}*\n`;
     if (paymentMethod === 'conta_aberta') msg += `⚠️ *PEDIDO NA CONTA (MENSALISTA)*\n`;
     msg += `--------------------------------\n`;
@@ -125,6 +138,7 @@ export default function CartPage() {
         const addr = selectedAddr || address;
         msg += `📦 *Entrega* (${shippingPrice > 0 ? `R$ ${shippingPrice.toFixed(2)}` : 'Grátis/Conta'})\n`;
         msg += `📍 ${addr.street || addr.nickname}, ${addr.number}\n`;
+        if (addr.complement) msg += `Obs: ${addr.complement}\n`;
         const lat = selectedAddr?.location?.lat || userLocation.lat;
         const lng = selectedAddr?.location?.lng || userLocation.lng;
         msg += `🗺️ Maps: http://googleusercontent.com/maps.google.com/?q=${lat},${lng}\n`;
@@ -144,8 +158,6 @@ export default function CartPage() {
 
   return (
     <div className="pb-40 pt-2 px-4 max-w-2xl mx-auto">
-      {/* ... (Layout visual igual ao anterior) ... */}
-      {/* Pode manter o JSX do arquivo anterior, só a lógica mudou */}
       <div className="flex items-center gap-2 mb-6"><Link href="/"><ArrowLeft/></Link><h1 className="font-bold text-lg">Seu Pedido</h1></div>
 
       <div className="space-y-3 mb-6">
@@ -179,7 +191,7 @@ export default function CartPage() {
                 <button onClick={() => setDeliveryMethod('pickup')} className={`flex-1 py-2 text-sm font-bold rounded-md transition-all ${deliveryMethod === 'pickup' ? 'bg-white text-pink-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Retirar</button>
             </div>
             {deliveryMethod === 'delivery' && (
-                <div className="space-y-3">
+                <div className="space-y-3 animate-in fade-in">
                     {savedAddresses.length > 0 ? (
                         <div className="space-y-2 mb-4">
                             <p className="text-xs font-bold text-gray-500 uppercase">Selecione:</p>

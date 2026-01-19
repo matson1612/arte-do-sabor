@@ -1,18 +1,16 @@
 // src/types/index.ts
 
 export type ClientType = 'standard' | 'monthly';
-
-// Atualizado com todos os status que você usa
 export type OrderStatus = 'em_aberto' | 'produzindo' | 'entrega' | 'finalizado' | 'cancelado';
 
 export interface Option {
   id: string;
   name: string;
   priceAdd: number;
-  priceAddPostpaid?: number; 
+  priceAddPostpaid?: number;
   isAvailable: boolean;
   stock: number | null;
-  linkedProductId?: string; 
+  linkedProductId?: string;
 }
 
 export interface ComplementGroup {
@@ -36,9 +34,7 @@ export interface Product {
   availablePostpaid?: boolean;
   stock: number | null;
   complementGroupIds: string[];
-  
-  // Auxiliares do front
-  price?: number; 
+  price?: number;
   fullGroups?: ComplementGroup[];
 }
 
@@ -54,46 +50,28 @@ export interface UserProfile {
   name: string;
   email: string;
   photoURL?: string;
-  clientType?: ClientType; 
+  clientType?: ClientType;
   createdAt: any;
   phone?: string;
   address?: any;
 }
 
-// --- CORREÇÃO AQUI ---
 export interface Order {
   id: string;
-  shortId?: string; // <--- O CAMPO QUE FALTAVA
+  shortId?: string;
   userId: string;
   userName: string;
   userPhone: string;
-  items: string; // JSON string
+  items: string; // JSON
   total: number;
   status: OrderStatus;
   createdAt: any;
   
-  // Campos obrigatórios para o Admin e Boleta
   paymentMethod: string;
   deliveryMethod: string;
   shippingPrice?: number;
   address?: any;
-}
-
-export interface StoreSettings {
-  id?: string; 
-  storeName: string;
-  cnpj: string;
-  phone: string;
-  address: {
-    street: string;
-    number: string;
-    district: string;
-    city: string;
-    state: string;
-  };
-  location: {
-    lat: number;
-    lng: number;
-  };
-  authorizedEmail: string;
+  
+  // NOVO CAMPO: Controla se o dinheiro entrou no caixa
+  isPaid: boolean; 
 }

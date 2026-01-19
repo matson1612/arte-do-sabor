@@ -26,9 +26,10 @@ export default function InvoicePage({ params }: { params: Promise<{ id: string }
         const snap = await getDocs(q);
         const allOrders = snap.docs.map(d => ({ id: d.id, ref: d.ref, ...d.data() }));
 
+        // FILTRO: Conta Aberta + NÃO PAGO (mesmo se finalizado) + Não cancelado
         const debt = allOrders.filter((o: any) => 
             o.paymentMethod === 'conta_aberta' && 
-            o.status !== 'finalizado' && 
+            o.isPaid !== true && 
             o.status !== 'cancelado'
         );
 
@@ -49,7 +50,10 @@ export default function InvoicePage({ params }: { params: Promise<{ id: string }
       setProcessing(true);
       try {
           const batch = writeBatch(db);
-          orders.forEach(order => batch.update(order.ref, { status: 'finalizado' }));
+          orders.forEach(order => {
+              // Marca como pago
+              batch.update(order.ref, { isPaid: true });
+          });
           await batch.commit();
           alert("Boleta quitada!");
           loadReport();
@@ -63,53 +67,32 @@ export default function InvoicePage({ params }: { params: Promise<{ id: string }
 
   return (
     <div className="bg-gray-50 min-h-screen p-6">
-      <div className="print:hidden max-w-4xl mx-auto mb-8 flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl shadow-sm border">
-        <div className="flex items-center gap-4">
-            <button onClick={() => router.back()} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft/></button>
-            <div>
-                <h1 className="font-bold text-lg">Boleta em Aberto</h1>
-                <p className="text-xs text-gray-500">{orders.length} pedidos pendentes</p>
-            </div>
-        </div>
-        
+      <div className="print:hidden max-w-4xl mx-auto mb-8 flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border">
+        <div className="flex items-center gap-4"><button onClick={() => router.back()} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft/></button><div><h1 className="font-bold text-lg">Boleta em Aberto</h1><p className="text-xs text-gray-500">{orders.length} pedidos pendentes</p></div></div>
         <div className="flex gap-2">
-            {orders.length > 0 && (
-                <button onClick={handleSettleAll} disabled={processing} className="bg-green-600 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-green-700 disabled:opacity-50">
-                    {processing ? <Loader2 className="animate-spin"/> : <DollarSign size={20}/>} QUITAR TUDO
-                </button>
-            )}
-            <button onClick={handlePrint} className="bg-slate-900 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-slate-800">
-                <Printer size={20}/> Imprimir
-            </button>
+            {orders.length > 0 && <button onClick={handleSettleAll} disabled={processing} className="bg-green-600 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-green-700 disabled:opacity-50">{processing ? <Loader2 className="animate-spin"/> : <DollarSign size={20}/>} QUITAR TUDO</button>}
+            <button onClick={handlePrint} className="bg-slate-900 text-white px-6 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-slate-800"><Printer size={20}/> Imprimir</button>
         </div>
       </div>
 
       <div className="max-w-4xl mx-auto bg-white p-10 shadow-lg print:shadow-none print:w-full print:max-w-none print:p-0">
-        <div className="flex justify-between items-start border-b-2 border-slate-900 pb-6 mb-6">
-            <div><h1 className="text-3xl font-bold text-slate-900">EXTRATO</h1><p className="text-gray-500 text-sm mt-1">Arte do Sabor</p></div>
-            <div className="text-right"><p className="text-sm font-bold text-gray-400 uppercase">Total</p><p className="font-bold text-red-600 text-2xl">R$ {totalAmount.toFixed(2)}</p></div>
-        </div>
-
+        <div className="flex justify-between items-start border-b-2 border-slate-900 pb-6 mb-6"><div><h1 className="text-3xl font-bold text-slate-900">DEMONSTRATIVO</h1><p className="text-gray-500 text-sm mt-1">Arte do Sabor</p></div><div className="text-right"><p className="text-sm font-bold text-gray-400 uppercase">Total Devido</p><p className="font-bold text-red-600 text-2xl">R$ {totalAmount.toFixed(2)}</p></div></div>
         <div className="mb-8 bg-gray-50 p-4 rounded border"><h2 className="text-xl font-bold text-slate-800">{client?.name}</h2></div>
-
         {orders.length === 0 ? <div className="text-center py-10 text-gray-400">Nenhuma pendência.</div> : (
             <table className="w-full text-left mb-8">
                 <thead><tr className="border-b"><th className="py-2">Data</th><th className="py-2">ID</th><th>Itens</th><th className="text-right">Valor</th></tr></thead>
-                <tbody className="divide-y">
-                    {orders.map((order) => {
-                        const date = order.createdAt ? new Date(order.createdAt.seconds * 1000) : new Date();
-                        let itemsList = "";
-                        try { itemsList = JSON.parse(order.items).map((i: any) => `${i.quantity}x ${i.name}`).join(', '); } catch (e) {}
-                        return (
-                            <tr key={order.id}>
-                                <td className="py-3 text-sm text-gray-700 w-24 align-top">{date.toLocaleDateString('pt-BR')}</td>
-                                <td className="py-3 text-xs font-mono text-gray-500 w-20 align-top">#{order.shortId || order.id.slice(0,4)}</td>
-                                <td className="py-3 text-sm text-gray-800 align-top">{itemsList}</td>
-                                <td className="py-3 text-sm font-bold text-slate-900 text-right align-top">{order.total.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</td>
-                            </tr>
-                        )
-                    })}
-                </tbody>
+                <tbody className="divide-y">{orders.map((order) => {
+                    const date = order.createdAt ? new Date(order.createdAt.seconds * 1000) : new Date();
+                    let itemsList = ""; try { itemsList = JSON.parse(order.items).map((i: any) => `${i.quantity}x ${i.name}`).join(', '); } catch (e) {}
+                    return (
+                        <tr key={order.id}>
+                            <td className="py-3 text-sm text-gray-700 w-24 align-top">{date.toLocaleDateString('pt-BR')}</td>
+                            <td className="py-3 text-xs font-mono text-gray-500 w-20 align-top">#{order.shortId || order.id.slice(0,4)}</td>
+                            <td className="py-3 text-sm text-gray-800 align-top">{itemsList}</td>
+                            <td className="py-3 text-sm font-bold text-slate-900 text-right align-top">{order.total.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'})}</td>
+                        </tr>
+                    )
+                })}</tbody>
             </table>
         )}
       </div>
