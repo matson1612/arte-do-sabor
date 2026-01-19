@@ -53,8 +53,6 @@ export default function ShopHome() {
           const groupIds = data.complementGroupIds || [];
           const loadedGroups = groupIds.map((id: string) => groupsMap[id]).filter(Boolean);
 
-          // CORREÇÃO DO ERRO DE TIPO AQUI:
-          // Usamos 'as unknown as Product' para forçar a tipagem dos dados vindos do banco
           return { 
               id: doc.id, 
               ...data, 
@@ -87,7 +85,10 @@ export default function ShopHome() {
     return acc;
   }, {} as Record<string, Product[]>);
 
+  // --- CORREÇÃO AQUI: Bloqueia abertura se estoque zerado ---
   const openModal = (product: Product) => {
+    if (product.stock !== null && product.stock <= 0) return;
+    
     setSelectedProduct(product);
     setQuantity(1);
     setObservation("");
@@ -97,7 +98,6 @@ export default function ShopHome() {
   const toggleOption = (group: ComplementGroup, option: Option) => {
     const currentSelected = selectedOptions[group.id] || [];
     const isAlreadySelected = currentSelected.find(o => o.id === option.id);
-
     let newSelection = [];
 
     if (isAlreadySelected) {
@@ -126,12 +126,8 @@ export default function ShopHome() {
 
   const handleAddToCart = () => {
     if (!selectedProduct) return;
-
     const missingRequired = selectedProduct.fullGroups?.find(g => g.required && (!selectedOptions[g.id] || selectedOptions[g.id].length === 0));
-    if (missingRequired) {
-        alert(`O grupo "${missingRequired.title}" é obrigatório.`);
-        return;
-    }
+    if (missingRequired) return alert(`O grupo "${missingRequired.title}" é obrigatório.`);
 
     let customName = selectedProduct.name;
     const allSelectedOpts = Object.values(selectedOptions).flat();
@@ -140,15 +136,13 @@ export default function ShopHome() {
         const optNames = allSelectedOpts.map(o => o.name).join(', ');
         customName += ` (+ ${optNames})`;
     }
-    
     if (observation.trim()) customName += ` [Obs: ${observation}]`;
-
-    const unitPrice = calculateTotal() / quantity;
 
     addToCart({
         ...selectedProduct,
         name: customName,
-        price: unitPrice,
+        price: calculateTotal() / quantity,
+        selectedOptions: selectedOptions // Passa opções para o carrinho
     }, quantity);
 
     setSelectedProduct(null);
@@ -166,130 +160,110 @@ export default function ShopHome() {
       </div>
 
       {visibleProducts.length === 0 ? (
-        <div className="text-center text-gray-400 py-10">
-          <ShoppingBag size={48} className="mx-auto mb-2 opacity-20"/>
-          <p>Nenhum produto cadastrado para seu perfil.</p>
-        </div>
+        <div className="text-center text-gray-400 py-10"><ShoppingBag size={48} className="mx-auto mb-2 opacity-20"/><p>Nenhum produto disponível.</p></div>
       ) : (
         Object.entries(groupedProducts).map(([category, items]) => (
           <section key={category}>
-            <h3 className="text-lg font-bold text-gray-800 mb-3 border-l-4 border-pink-600 pl-3 capitalize">
-              {category}
-            </h3>
+            <h3 className="text-lg font-bold text-gray-800 mb-3 border-l-4 border-pink-600 pl-3 capitalize">{category}</h3>
             <div className="grid gap-4 md:grid-cols-2">
-              {items.map((product) => (
-                <div 
-                    key={product.id} 
-                    onClick={() => openModal(product)} 
-                    className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex gap-3 cursor-pointer hover:border-pink-300 transition-colors group"
-                >
-                  <div className="w-24 h-24 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 relative">
-                    {product.imageUrl ? (
-                      <img src={product.imageUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                    ) : (
-                      <ImageOff className="m-auto mt-8 text-gray-300" size={20} />
+              {items.map((product) => {
+                // --- LÓGICA DE ESTOQUE VISUAL ---
+                const isOutOfStock = product.stock !== null && product.stock <= 0;
+                
+                return (
+                  <div 
+                      key={product.id} 
+                      onClick={() => openModal(product)} 
+                      className={`bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex gap-3 transition-all group relative overflow-hidden 
+                      ${isOutOfStock ? 'opacity-60 grayscale cursor-not-allowed bg-gray-50' : 'cursor-pointer hover:border-pink-300 hover:shadow-md'}`}
+                  >
+                    {/* Tarja de Esgotado */}
+                    {isOutOfStock && (
+                        <div className="absolute inset-0 z-10 flex items-center justify-center bg-gray-100/40 backdrop-blur-[1px]">
+                            <span className="bg-slate-800 text-white text-[10px] font-black px-3 py-1.5 rounded uppercase tracking-wider shadow-sm border border-slate-600 transform -rotate-6">
+                                Esgotado
+                            </span>
+                        </div>
                     )}
-                  </div>
-                  <div className="flex-1 flex flex-col justify-between py-1">
-                    <div>
-                      <h4 className="font-bold text-gray-800 text-sm line-clamp-1">{product.name}</h4>
-                      <p className="text-xs text-gray-500 line-clamp-2 mt-1">{product.description}</p>
+
+                    <div className="w-24 h-24 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 relative">
+                      {product.imageUrl ? <img src={product.imageUrl} className="w-full h-full object-cover" /> : <ImageOff className="m-auto mt-8 text-gray-300" size={20} />}
                     </div>
-                    <div className="flex justify-between items-end">
-                      <span className="font-bold text-green-600 text-sm">
-                        {getPrice(product).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                      </span>
-                      <button className="bg-pink-50 text-pink-600 p-1.5 rounded-full hover:bg-pink-600 hover:text-white transition-colors">
-                        <Plus size={16} />
-                      </button>
+                    <div className="flex-1 flex flex-col justify-between py-1">
+                      <div>
+                        <h4 className="font-bold text-gray-800 text-sm line-clamp-1">{product.name}</h4>
+                        <p className="text-xs text-gray-500 line-clamp-2 mt-1">{product.description}</p>
+                      </div>
+                      <div className="flex justify-between items-end">
+                        <span className="font-bold text-green-600 text-sm">{getPrice(product).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                        {/* Esconde botão + se esgotado */}
+                        {!isOutOfStock && <button className="bg-pink-50 text-pink-600 p-1.5 rounded-full hover:bg-pink-600 hover:text-white transition-colors"><Plus size={16} /></button>}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         ))
       )}
 
+      {/* MODAL */}
       {selectedProduct && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4 animate-in fade-in duration-200 backdrop-blur-sm">
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
-
             <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-10 z-10 max-h-[90vh] overflow-y-auto">
-                <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-black/20 text-white p-1 rounded-full hover:bg-black/40 backdrop-blur-md">
-                    <X size={20}/>
-                </button>
-
+                <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-black/20 text-white p-1 rounded-full hover:bg-black/40"><X size={20}/></button>
                 <div className="h-48 bg-gray-100 relative">
-                    {selectedProduct.imageUrl ? (
-                         <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" />
-                    ) : (
-                        <div className="w-full h-full flex items-center justify-center text-gray-400"><ImageOff size={40}/></div>
-                    )}
+                    {selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-400"><ImageOff size={40}/></div>}
                 </div>
-
                 <div className="p-6 space-y-6">
                     <div>
                         <div className="flex justify-between items-start mb-1">
                             <h2 className="text-xl font-bold text-gray-800">{selectedProduct.name}</h2>
-                            <div className="text-xl font-bold text-green-600">
-                                {getPrice(selectedProduct).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                            </div>
+                            <div className="text-xl font-bold text-green-600">{getPrice(selectedProduct).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
                         </div>
-                        <p className="text-sm text-gray-500 leading-relaxed">{selectedProduct.description}</p>
+                        <p className="text-sm text-gray-500">{selectedProduct.description}</p>
                     </div>
 
                     {/* COMPLEMENTOS */}
-                    {selectedProduct.fullGroups && selectedProduct.fullGroups.length > 0 && (
-                        <div className="space-y-4">
-                            {selectedProduct.fullGroups.map(group => (
-                                <div key={group.id} className="bg-gray-50 p-3 rounded-lg border">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <h3 className="font-bold text-gray-700 text-sm">{group.title}</h3>
-                                        <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${group.required ? 'bg-red-100 text-red-600' : 'bg-gray-200 text-gray-500'}`}>
-                                            {group.required ? 'OBRIGATÓRIO' : 'OPCIONAL'}
-                                            {group.maxSelection > 1 && ` (Até ${group.maxSelection})`}
-                                        </span>
-                                    </div>
-                                    <div className="space-y-2">
-                                        {group.options.map(opt => {
-                                            const isSelected = selectedOptions[group.id]?.some(o => o.id === opt.id);
-                                            const optPrice = getOptionPrice(opt);
-                                            
-                                            return (
-                                                <div key={opt.id} onClick={() => toggleOption(group, opt)} className={`flex justify-between items-center p-2 rounded border cursor-pointer bg-white transition-all ${isSelected ? 'border-pink-500 ring-1 ring-pink-500' : 'border-gray-200 hover:border-pink-300'}`}>
-                                                    <div className="flex items-center gap-2">
-                                                        <div className={`w-4 h-4 rounded-sm border flex items-center justify-center ${isSelected ? 'bg-pink-600 border-pink-600 text-white' : 'border-gray-300'}`}>
-                                                            {isSelected && <CheckSquare size={12}/>}
-                                                        </div>
-                                                        <span className="text-sm text-gray-700">{opt.name}</span>
-                                                    </div>
-                                                    {optPrice > 0 && <span className="text-xs font-bold text-green-600">+ R$ {optPrice.toFixed(2)}</span>}
-                                                </div>
-                                            )
-                                        })}
-                                    </div>
-                                </div>
-                            ))}
+                    {selectedProduct.fullGroups?.map(group => (
+                        <div key={group.id} className="bg-gray-50 p-3 rounded-lg border">
+                            <div className="flex justify-between items-center mb-2">
+                                <h3 className="font-bold text-gray-700 text-sm">{group.title}</h3>
+                                <span className="text-[10px] bg-gray-200 px-2 py-0.5 rounded font-bold">{group.required ? 'OBRIGATÓRIO' : 'OPCIONAL'}</span>
+                            </div>
+                            <div className="space-y-2">
+                                {group.options.map(opt => {
+                                    const isSelected = selectedOptions[group.id]?.some(o => o.id === opt.id);
+                                    // Verifica estoque do opcional
+                                    const optOutOfStock = opt.stock !== null && opt.stock <= 0;
+                                    
+                                    return (
+                                        <div key={opt.id} onClick={() => !optOutOfStock && toggleOption(group, opt)} className={`flex justify-between items-center p-2 rounded border transition-all ${optOutOfStock ? 'opacity-50 bg-gray-100 cursor-not-allowed' : 'cursor-pointer hover:border-pink-300 bg-white'} ${isSelected ? 'border-pink-500 ring-1 ring-pink-500' : 'border-gray-200'}`}>
+                                            <div className="flex items-center gap-2">
+                                                <div className={`w-4 h-4 rounded-sm border flex items-center justify-center ${isSelected ? 'bg-pink-600 border-pink-600 text-white' : 'border-gray-300'}`}>{isSelected && <CheckSquare size={12}/>}</div>
+                                                <span className="text-sm text-gray-700">{opt.name} {optOutOfStock && '(Esgotado)'}</span>
+                                            </div>
+                                            {!optOutOfStock && getOptionPrice(opt) > 0 && <span className="text-xs font-bold text-green-600">+ R$ {getOptionPrice(opt).toFixed(2)}</span>}
+                                        </div>
+                                    )
+                                })}
+                            </div>
                         </div>
-                    )}
+                    ))}
 
-                    <div>
-                        <label className="font-bold text-gray-700 text-sm mb-2 flex items-center gap-2"><MessageSquare size={16}/> Observação</label>
-                        <textarea className="w-full p-3 border rounded-lg bg-gray-50 focus:bg-white text-sm" rows={2} placeholder="Ex: Sem cebola..." value={observation} onChange={e => setObservation(e.target.value)}/>
-                    </div>
+                    <div><label className="font-bold text-gray-700 text-sm mb-2 flex items-center gap-2"><MessageSquare size={16}/> Observação</label><textarea className="w-full p-3 border rounded-lg bg-gray-50 focus:bg-white text-sm" rows={2} placeholder="Ex: Sem cebola..." value={observation} onChange={e => setObservation(e.target.value)}/></div>
 
                     <div className="flex items-center gap-4 pt-2">
                         <div className="flex items-center border rounded-xl overflow-hidden bg-gray-50 h-12">
-                            <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="px-4 h-full hover:bg-gray-200 text-gray-600"><Minus size={18}/></button>
+                            <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="px-4 h-full hover:bg-gray-200"><Minus size={18}/></button>
                             <span className="w-8 text-center font-bold text-lg">{quantity}</span>
-                            <button onClick={() => setQuantity(q => q + 1)} className="px-4 h-full hover:bg-gray-200 text-pink-600"><Plus size={18}/></button>
+                            <button onClick={() => setQuantity(q => q + 1)} className="px-4 h-full hover:bg-gray-200"><Plus size={18}/></button>
                         </div>
                         <button onClick={handleAddToCart} className="flex-1 bg-pink-600 text-white font-bold h-12 rounded-xl hover:bg-pink-700 flex justify-center items-center gap-2 shadow-lg">
                             <span>Adicionar</span>
-                            <span className="bg-pink-700/50 px-2 py-0.5 rounded text-xs">
-                                {calculateTotal().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                            </span>
+                            <span className="bg-pink-700/50 px-2 py-0.5 rounded text-xs">{calculateTotal().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                         </button>
                     </div>
                 </div>
