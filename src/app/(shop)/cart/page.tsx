@@ -4,7 +4,7 @@
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { Trash2, ArrowLeft, Send, MapPin, Search, Loader2, ShoppingBag, CreditCard, FileText, CheckCircle, Plus, Minus, AlertTriangle, Phone } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
 import { db } from "@/lib/firebase";
 import { doc, getDoc, addDoc, collection, serverTimestamp, runTransaction, updateDoc } from "firebase/firestore";
@@ -33,18 +33,15 @@ export default function CartPage() {
   const [cepInput, setCepInput] = useState("");
   const [userLocation, setUserLocation] = useState(DEFAULT_CENTER);
   const [shippingPrice, setShippingPrice] = useState(0);
-  const [selectedRegionId, setSelectedRegionId] = useState('plano');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [stockWarnings, setStockWarnings] = useState<string[]>([]);
-  
-  // NOVO: Telefone obrigatório se não existir no cadastro
   const [missingPhone, setMissingPhone] = useState("");
 
   const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_MAPS_API_KEY });
   const isMonthlyOrReseller = profile?.clientType === 'monthly' || profile?.clientType === 'reseller';
 
-  // Validação de Estoque
   useEffect(() => {
+    // Validação de Estoque Visual
     const validateCartStock = async () => {
         if (items.length === 0) return;
         const warnings: string[] = [];
@@ -55,19 +52,18 @@ export default function CartPage() {
                 if (prodSnap.exists()) {
                     const realStock = prodSnap.data().stock;
                     if (realStock !== null && realStock <= 0) {
-                        warnings.push(`"${item.name}" esgotou e foi removido.`);
+                        warnings.push(`"${item.name}" esgotou.`);
                         removeFromCart(item.cartId);
                     } else if (realStock !== null && item.quantity > realStock) {
                         warnings.push(`"${item.name}": Qtd ajustada para ${realStock}.`);
                         updateQuantity(item.cartId, realStock);
                     }
                 }
-            } catch (e) { console.error("Erro check stock", e); }
+            } catch (e) { console.error(e); }
         }
         if (warnings.length > 0) setStockWarnings(warnings);
     };
     validateCartStock();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); 
 
   useEffect(() => {
@@ -83,10 +79,10 @@ export default function CartPage() {
   useEffect(() => {
     if (paymentMethod === 'conta_aberta' || deliveryMethod === 'pickup') setShippingPrice(0);
     else {
-        const region = REGIONS.find(r => r.id === selectedRegionId);
-        setShippingPrice(region && typeof region.price === 'number' ? region.price : 8.00);
+        // Lógica simples de frete fixo por região (pode expandir para GPS depois)
+        setShippingPrice(8.00); 
     }
-  }, [deliveryMethod, selectedRegionId, paymentMethod]);
+  }, [deliveryMethod, paymentMethod]);
 
   const handleBuscaCep = async () => { 
       const cep = cepInput.replace(/\D/g, '');
@@ -110,15 +106,12 @@ export default function CartPage() {
     if (!user) { loginGoogle(); return; }
     if (isSubmitting) return;
 
-    // VALIDAÇÃO: Telefone Obrigatório
     const finalPhone = profile?.phone || missingPhone;
-    if (!finalPhone || finalPhone.length < 8) {
-        return alert("Por favor, informe um número de WhatsApp válido para contato.");
-    }
+    if (!finalPhone || finalPhone.length < 8) return alert("Informe um WhatsApp válido.");
 
     const selectedAddr = savedAddresses.find(a => a.id === selectedAddressId);
     if (deliveryMethod === 'delivery' && !selectedAddr && !address.number && paymentMethod !== 'conta_aberta') {
-        return alert("Por favor, selecione ou informe um endereço.");
+        return alert("Selecione um endereço.");
     }
 
     setIsSubmitting(true);
@@ -126,13 +119,12 @@ export default function CartPage() {
     const shortId = generateShortId(); 
 
     try {
-        // 1. Se o usuário não tinha telefone, SALVA AGORA no perfil dele
         if (!profile?.phone && missingPhone) {
             await updateDoc(doc(db, "users", user.uid), { phone: missingPhone });
         }
 
         await runTransaction(db, async (transaction) => {
-            // 2. Validação de Estoque (Transação)
+            // 1. Validação de Estoque (Produtos Principais)
             for (const item of items) {
                 if (item.id) {
                     const prodRef = doc(db, "products", item.id);
@@ -140,20 +132,63 @@ export default function CartPage() {
                     if (!prodSnap.exists()) throw new Error(`Produto ${item.name} não existe.`);
                     const currentStock = prodSnap.data().stock;
                     if (currentStock !== null && currentStock < item.quantity) {
-                        throw new Error(`Estoque insuficiente para ${item.name}. Restam ${currentStock}.`);
+                        throw new Error(`Estoque insuficiente para ${item.name}.`);
                     }
                     transaction.update(prodRef, { stock: currentStock - item.quantity });
                 }
-                // (Validação de complementos omitida para brevidade, mas deve estar aqui igual ao anterior)
+
+                // 2. Validação de Complementos (CORRIGIDO PARA LINKED PRODUCT)
+                if (item.selectedOptions) {
+                    for (const [groupId, opts] of Object.entries(item.selectedOptions)) {
+                        const groupRef = doc(db, "complement_groups", groupId);
+                        const groupSnap = await transaction.get(groupRef);
+                        
+                        if (groupSnap.exists()) {
+                            const optionsList = groupSnap.data().options || [];
+                            let groupChanged = false;
+
+                            // Percorre as opções escolhidas
+                            for (const userOpt of (opts as Option[])) {
+                                if (userOpt.linkedProductId) {
+                                    // SE FOR PRODUTO VINCULADO: Desconta do produto real
+                                    const linkedRef = doc(db, "products", userOpt.linkedProductId);
+                                    const linkedSnap = await transaction.get(linkedRef);
+                                    if (!linkedSnap.exists()) throw new Error(`Complemento ${userOpt.name} não existe mais.`);
+                                    
+                                    const linkedStock = linkedSnap.data().stock;
+                                    // A quantidade consumida é a do produto pai (1 refri por 1 combo)
+                                    // Se quiser que o complemento tenha qtd própria, precisa mudar a estrutura do carrinho
+                                    // Aqui assumimos 1:1 com o item principal
+                                    const qtyNeeded = item.quantity;
+
+                                    if (linkedStock !== null) {
+                                        if (linkedStock < qtyNeeded) throw new Error(`Estoque insuficiente para complemento: ${userOpt.name}`);
+                                        transaction.update(linkedRef, { stock: linkedStock - qtyNeeded });
+                                    }
+                                } else {
+                                    // SE FOR OPÇÃO SIMPLES: Desconta do array do grupo
+                                    const idx = optionsList.findIndex((o: any) => o.id === userOpt.id);
+                                    if (idx !== -1 && optionsList[idx].stock !== null) {
+                                        if (optionsList[idx].stock < item.quantity) throw new Error(`Estoque insuficiente: ${userOpt.name}`);
+                                        optionsList[idx].stock -= item.quantity;
+                                        groupChanged = true;
+                                    }
+                                }
+                            }
+
+                            // Só atualiza o grupo se houve mudança em opções simples
+                            if (groupChanged) transaction.update(groupRef, { options: optionsList });
+                        }
+                    }
+                }
             }
 
-            // 3. Criação do Pedido
             const newOrderRef = doc(collection(db, "orders"));
             transaction.set(newOrderRef, {
                 shortId: shortId,
                 userId: user.uid,
                 userName: profile?.name || user.displayName,
-                userPhone: finalPhone, // Usa o telefone garantido
+                userPhone: finalPhone,
                 items: JSON.stringify(items),
                 total: finalTotal,
                 status: 'em_aberto',
@@ -166,23 +201,19 @@ export default function CartPage() {
             });
         });
 
-        // WhatsApp
         let msg = `*PEDIDO #${shortId} - ${profile?.name || user.displayName}*\n`;
-        if (paymentMethod === 'conta_aberta') msg += `⚠️ *PEDIDO NA CONTA (MENSALISTA/REVENDA)*\n`;
+        if (paymentMethod === 'conta_aberta') msg += `⚠️ *PEDIDO NA CONTA*\n`;
         msg += `--------------------------------\n`;
         items.forEach(i => msg += `${i.quantity}x ${i.name}\n`);
-        msg += `--------------------------------\n`;
         
         if (deliveryMethod === 'delivery') {
-            const addr = selectedAddr || address;
-            msg += `📦 *Entrega* (${shippingPrice > 0 ? `R$ ${shippingPrice.toFixed(2)}` : 'Grátis/Conta'})\n`;
-            msg += `📍 ${addr.street || addr.nickname}, ${addr.number}\n`;
+            msg += `📦 *Entrega*\n`;
         } else {
-            msg += `🏪 *Retirada no Balcão*\n`;
+            msg += `🏪 *Retirada*\n`;
         }
         
         const payText = paymentMethod === 'conta_aberta' ? 'CONTA MENSAL' : paymentMethod.toUpperCase();
-        msg += `💳 Pagamento: ${payText}\n📞 Contato: ${finalPhone}\n\n*TOTAL: R$ ${finalTotal.toFixed(2)}*`;
+        msg += `💳 Pagamento: ${payText}\n📞: ${finalPhone}\n\n*TOTAL: R$ ${finalTotal.toFixed(2)}*`;
 
         window.open(`https://wa.me/${PHONE_NUMBER}?text=${encodeURIComponent(msg)}`, "_blank");
         clearCart();
@@ -209,7 +240,6 @@ export default function CartPage() {
           </div>
       )}
 
-      {/* Lista de Itens (Mantida igual...) */}
       <div className="space-y-3 mb-6">
         {items.map(item => (
             <div key={item.cartId} className="bg-white p-3 rounded-xl border flex justify-between items-center shadow-sm">
@@ -221,21 +251,14 @@ export default function CartPage() {
         ))}
       </div>
 
-      {/* INPUT TELEFONE OBRIGATÓRIO (Se não tiver no perfil) */}
       {user && !profile?.phone && (
           <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl mb-4 animate-in slide-in-from-left">
               <label className="text-sm font-bold text-orange-800 flex items-center gap-2 mb-2"><Phone size={16}/> WhatsApp para Contato (Obrigatório)</label>
-              <input 
-                className="w-full p-3 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none" 
-                placeholder="(00) 00000-0000" 
-                value={missingPhone} 
-                onChange={e => setMissingPhone(e.target.value)}
-              />
+              <input className="w-full p-3 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none" placeholder="(00) 00000-0000" value={missingPhone} onChange={e => setMissingPhone(e.target.value)}/>
               <p className="text-[10px] text-orange-600 mt-1">Necessário para confirmar seu pedido.</p>
           </div>
       )}
 
-      {/* Pagamento */}
       <div className="bg-white p-4 rounded-xl shadow-sm border mb-4">
         <h2 className="font-bold text-sm mb-3 flex items-center gap-2"><CreditCard size={16}/> Forma de Pagamento</h2>
         <div className="grid grid-cols-3 gap-2">
@@ -248,7 +271,6 @@ export default function CartPage() {
         </div>
       </div>
 
-      {/* Entrega (Só aparece se não for conta aberta) */}
       {paymentMethod !== 'conta_aberta' && (
           <div className="bg-white p-4 rounded-xl shadow-sm border space-y-4 mb-4">
             <h2 className="font-bold text-sm flex gap-2 items-center"><MapPin size={16} className="text-pink-600"/> Entrega</h2>

@@ -6,7 +6,7 @@ import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
-import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X, CheckSquare, MessageSquare, ArrowRight } from "lucide-react";
+import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X, CheckSquare, MessageSquare } from "lucide-react";
 import { Product, ComplementGroup, Option } from "@/types";
 import HeroCarousel from "@/components/HeroCarousel";
 
@@ -16,32 +16,21 @@ export default function ShopHome() {
   
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [observation, setObservation] = useState("");
   const [selectedOptions, setSelectedOptions] = useState<Record<string, Option[]>>({});
 
-  // --- LÓGICA DE PREÇOS ATUALIZADA ---
   const getPrice = (item: Product) => {
-    // 1. Revendedor
-    if (profile?.clientType === 'reseller' && item.priceReseller && item.priceReseller > 0) {
-        return item.priceReseller;
-    }
-    // 2. Mensalista
-    if (profile?.clientType === 'monthly' && item.pricePostpaid && item.pricePostpaid > 0) {
-        return item.pricePostpaid;
-    }
-    // 3. Padrão
+    if (profile?.clientType === 'reseller' && item.priceReseller && item.priceReseller > 0) return item.priceReseller;
+    if (profile?.clientType === 'monthly' && item.pricePostpaid && item.pricePostpaid > 0) return item.pricePostpaid;
     return item.basePrice || 0;
   };
 
   const getOptionPrice = (opt: Option) => {
-      if (profile?.clientType === 'reseller' && opt.priceAddReseller !== undefined) {
-          return opt.priceAddReseller;
-      }
-      if (profile?.clientType === 'monthly' && opt.priceAddPostpaid !== undefined) {
-          return opt.priceAddPostpaid;
-      }
+      if (profile?.clientType === 'reseller' && opt.priceAddReseller !== undefined) return opt.priceAddReseller;
+      if (profile?.clientType === 'monthly' && opt.priceAddPostpaid !== undefined) return opt.priceAddPostpaid;
       return opt.priceAdd;
   };
 
@@ -53,18 +42,45 @@ export default function ShopHome() {
             getDocs(collection(db, "complement_groups"))
         ]);
 
-        const groupsMap: Record<string, ComplementGroup> = {};
-        groupsSnap.docs.forEach(doc => {
-            groupsMap[doc.id] = { id: doc.id, ...doc.data() } as ComplementGroup;
+        // 1. Mapa de Produtos para Rápido Acesso
+        const productMap = new Map<string, Product>();
+        productsSnap.docs.forEach(doc => {
+            productMap.set(doc.id, { id: doc.id, ...doc.data() } as Product);
         });
 
-        const items = productsSnap.docs.map((doc) => {
-          const data = doc.data();
-          const channel = data.salesChannel || 'delivery';
-          const groupIds = data.complementGroupIds || [];
+        // 2. Carrega Grupos e Sincroniza (Hidratação)
+        const groupsMap: Record<string, ComplementGroup> = {};
+        groupsSnap.docs.forEach(doc => {
+            const groupData = doc.data() as ComplementGroup;
+            
+            // AQUI ESTÁ A MÁGICA: Atualiza as opções vinculadas com dados do produto real
+            const hydratedOptions = groupData.options?.map(opt => {
+                if (opt.linkedProductId && productMap.has(opt.linkedProductId)) {
+                    const linkedProd = productMap.get(opt.linkedProductId)!;
+                    return {
+                        ...opt,
+                        name: linkedProd.name, // Atualiza nome
+                        stock: linkedProd.stock, // Usa estoque do produto
+                        isAvailable: linkedProd.isAvailable, // Usa disponibilidade do produto
+                        // Atualiza preços
+                        priceAdd: linkedProd.basePrice,
+                        priceAddPostpaid: linkedProd.pricePostpaid,
+                        priceAddReseller: linkedProd.priceReseller
+                    };
+                }
+                return opt;
+            });
+
+            groupsMap[doc.id] = { id: doc.id, ...groupData, options: hydratedOptions || [] };
+        });
+
+        // 3. Monta a lista final de produtos
+        const items = Array.from(productMap.values()).map((p) => {
+          const channel = p.salesChannel || 'delivery';
+          const groupIds = p.complementGroupIds || [];
           const loadedGroups = groupIds.map((id: string) => groupsMap[id]).filter(Boolean);
 
-          return { id: doc.id, ...data, salesChannel: channel, fullGroups: loadedGroups } as unknown as Product;
+          return { ...p, salesChannel: channel, fullGroups: loadedGroups };
         });
 
         setProducts(items);
@@ -89,7 +105,6 @@ export default function ShopHome() {
     return acc;
   }, {} as Record<string, Product[]>);
 
-  // ... (Funções Modal e AddToCart mantidas iguais) ...
   const openModal = (product: Product) => {
     if (product.stock !== null && product.stock <= 0) return;
     setSelectedProduct(product);
@@ -163,7 +178,6 @@ export default function ShopHome() {
           </section>
         ))
       )}
-      {/* Modal igual... */}
       {selectedProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 p-4 animate-in fade-in duration-300 backdrop-blur-sm">
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
