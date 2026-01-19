@@ -28,7 +28,7 @@ export interface Product {
   description: string;
   basePrice: number;
   pricePostpaid?: number;
-  imageUrl: string; // Foto Principal (Capa)
+  imageUrl: string;
   category: string;
   isAvailable: boolean;
   availableStandard?: boolean;
@@ -38,10 +38,11 @@ export interface Product {
   price?: number;
   fullGroups?: ComplementGroup[];
   salesChannel?: SalesChannel;
+  gallery?: string[];
+  videoUrl?: string;
   
-  // NOVOS CAMPOS PARA VITRINE
-  gallery?: string[]; // Lista de URLs de fotos extras
-  videoUrl?: string;  // Link do YouTube/Instagram/TikTok
+  // NOVO: Define se aparece no Carrossel
+  isFeatured?: boolean; 
 }
 
 export interface CartItem extends Product {

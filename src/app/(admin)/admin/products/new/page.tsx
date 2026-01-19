@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Upload, Box, Layers, Loader2, Store, Video, Image as ImageIcon, X } from "lucide-react";
+import { ArrowLeft, Upload, Box, Layers, Loader2, Store, Video, Image as ImageIcon, X, Star } from "lucide-react";
 import { Product, ComplementGroup, SalesChannel } from "@/types";
 import { createProduct } from "@/services/productService";
 import { getAllGroups, createGroup } from "@/services/complementService";
@@ -14,8 +14,6 @@ export default function NewProductPage() {
   const [loading, setLoading] = useState(false);
   const [allMasterGroups, setAllMasterGroups] = useState<ComplementGroup[]>([]);
   const [manageStock, setManageStock] = useState(false);
-  
-  // Upload States
   const [uploading, setUploading] = useState(false);
   const [galleryUploading, setGalleryUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -28,46 +26,25 @@ export default function NewProductPage() {
     isAvailable: true, availableStandard: true, availablePostpaid: true,
     stock: null, complementGroupIds: [],
     salesChannel: 'delivery',
-    gallery: [], // Lista de fotos extras
-    videoUrl: "" // Link de vídeo
+    gallery: [], videoUrl: "", isFeatured: false // Inicia sem destaque
   });
 
   useEffect(() => { getAllGroups().then(setAllMasterGroups).catch(console.error); }, []);
 
-  // Upload da Capa
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-        setUploading(true);
-        const url = await uploadImage(file);
-        setFormData(prev => ({ ...prev, imageUrl: url }));
-    } catch (error) { alert("Erro ao enviar imagem."); } 
-    finally { setUploading(false); }
+    const file = e.target.files?.[0]; if (!file) return;
+    try { setUploading(true); const url = await uploadImage(file); setFormData(p => ({ ...p, imageUrl: url })); } 
+    catch (e) { alert("Erro ao enviar imagem."); } finally { setUploading(false); }
   };
 
-  // Upload da Galeria (Múltiplos)
   const handleGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files;
-      if (!files || files.length === 0) return;
-      
+      const files = e.target.files; if (!files?.length) return;
       setGalleryUploading(true);
       try {
           const newUrls = [];
-          for (let i = 0; i < files.length; i++) {
-              const url = await uploadImage(files[i]);
-              newUrls.push(url);
-          }
-          setFormData(prev => ({ ...prev, gallery: [...(prev.gallery || []), ...newUrls] }));
-      } catch (error) { alert("Erro ao enviar fotos da galeria."); }
-      finally { setGalleryUploading(false); }
-  };
-
-  const removeGalleryImage = (index: number) => {
-      setFormData(prev => ({
-          ...prev,
-          gallery: prev.gallery?.filter((_, i) => i !== index)
-      }));
+          for (let i = 0; i < files.length; i++) newUrls.push(await uploadImage(files[i]));
+          setFormData(p => ({ ...p, gallery: [...(p.gallery||[]), ...newUrls] }));
+      } catch (e) { alert("Erro ao enviar galeria."); } finally { setGalleryUploading(false); }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -89,14 +66,15 @@ export default function NewProductPage() {
         complementGroupIds: formData.complementGroupIds || [],
         salesChannel: formData.salesChannel || 'delivery',
         gallery: formData.gallery || [],
-        videoUrl: formData.videoUrl || ""
+        videoUrl: formData.videoUrl || "",
+        isFeatured: formData.isFeatured || false
       };
       await createProduct(payload);
       router.push("/admin"); 
-    } catch (error) { alert("Erro ao salvar."); setLoading(false); }
+    } catch (e) { alert("Erro ao salvar."); setLoading(false); }
   };
 
-  const quickGroup = async () => { /* ...mesma lógica... */ 
+  const quickGroup = async () => { 
     const name = prompt("Nome do Grupo:"); if (!name) return;
     try { const id = await createGroup({ title: name, required: false, maxSelection: 1, options: [] });
     setAllMasterGroups([...allMasterGroups, { id, title: name, required: false, maxSelection: 1, options: [] }]);
@@ -110,10 +88,18 @@ export default function NewProductPage() {
       <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-8">
             <section className="bg-white p-6 rounded border space-y-6">
-                <h2 className="font-bold border-b pb-2">Dados Básicos</h2>
+                
+                {/* Header Dados + Destaque */}
+                <div className="flex justify-between items-start">
+                    <h2 className="font-bold border-b pb-2 flex-1">Dados Básicos</h2>
+                    <label className="flex items-center gap-2 text-sm font-bold text-yellow-600 bg-yellow-50 px-3 py-1 rounded cursor-pointer border border-yellow-200 hover:bg-yellow-100 select-none">
+                        <input type="checkbox" className="w-4 h-4 text-yellow-600 rounded" checked={formData.isFeatured} onChange={e => setFormData({...formData, isFeatured: e.target.checked})} /> 
+                        <Star size={16} fill="currentColor"/> Destaque (Carrossel)
+                    </label>
+                </div>
+
                 <input placeholder="Nome do Produto" required className="w-full p-3 border rounded" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})}/>
                 
-                {/* Canal */}
                 <div className="bg-blue-50 p-4 rounded border border-blue-200">
                     <label className="text-sm font-bold text-blue-800 flex items-center gap-2 mb-2"><Store size={16}/> Canal de Venda</label>
                     <div className="grid grid-cols-3 gap-2">
@@ -123,41 +109,26 @@ export default function NewProductPage() {
                     </div>
                 </div>
 
-                {/* Preços */}
                 <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded border">
                     <div><label className="text-xs font-bold text-green-700 uppercase mb-1 block">R$ À Vista</label><input type="number" step="0.01" placeholder="0.00" required className="w-full p-3 border rounded border-green-200" value={formData.basePrice} onChange={e => setFormData({...formData, basePrice: parseFloat(e.target.value)})}/></div>
                     <div><label className="text-xs font-bold text-purple-700 uppercase mb-1 block">R$ Mensalista</label><input type="number" step="0.01" placeholder="Igual se vazio" className="w-full p-3 border rounded border-purple-200" value={formData.pricePostpaid || ''} onChange={e => setFormData({...formData, pricePostpaid: parseFloat(e.target.value)})}/></div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                    <select className="w-full p-3 border rounded bg-white" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}><option value="bolos">Bolos</option><option value="doces">Doces</option><option value="salgados">Salgados</option><option value="bebidas">Bebidas</option></select>
-                </div>
-                <textarea rows={3} placeholder="Descrição completa..." className="w-full p-3 border rounded" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})}/>
+                <div className="grid grid-cols-2 gap-4"><select className="w-full p-3 border rounded bg-white" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}><option value="bolos">Bolos</option><option value="doces">Doces</option><option value="salgados">Salgados</option><option value="bebidas">Bebidas</option></select></div>
+                <textarea rows={3} placeholder="Descrição..." className="w-full p-3 border rounded" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})}/>
                 
-                {/* ÁREA DE GALERIA E VÍDEO (Aparece para todos, mas é vital para Encomendas) */}
                 <div className="bg-gray-50 p-4 rounded border space-y-4">
-                    <h3 className="font-bold text-sm flex items-center gap-2"><ImageIcon size={16}/> Galeria de Fotos (Vitrine)</h3>
-                    
+                    <h3 className="font-bold text-sm flex items-center gap-2"><ImageIcon size={16}/> Galeria (Vitrine)</h3>
                     <div className="grid grid-cols-4 gap-2">
                         {formData.gallery?.map((url, idx) => (
-                            <div key={idx} className="relative aspect-square rounded overflow-hidden border bg-white group">
-                                <img src={url} className="w-full h-full object-cover"/>
-                                <button type="button" onClick={() => removeGalleryImage(idx)} className="absolute top-1 right-1 bg-red-500 text-white p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition"><X size={12}/></button>
-                            </div>
+                            <div key={idx} className="relative aspect-square rounded overflow-hidden border bg-white group"><img src={url} className="w-full h-full object-cover"/><button type="button" onClick={() => setFormData(p => ({...p, gallery: p.gallery?.filter((_, i) => i !== idx)}))} className="absolute top-1 right-1 bg-red-500 text-white p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition"><X size={12}/></button></div>
                         ))}
-                        <button type="button" onClick={() => galleryInputRef.current?.click()} className="aspect-square border-2 border-dashed border-gray-300 rounded flex flex-col items-center justify-center text-gray-400 hover:border-pink-500 hover:text-pink-500 transition">
-                            {galleryUploading ? <Loader2 className="animate-spin"/> : <><Upload size={20}/><span className="text-[10px] mt-1">Add +</span></>}
-                        </button>
+                        <button type="button" onClick={() => galleryInputRef.current?.click()} className="aspect-square border-2 border-dashed border-gray-300 rounded flex flex-col items-center justify-center text-gray-400 hover:border-pink-500 hover:text-pink-500 transition">{galleryUploading ? <Loader2 className="animate-spin"/> : <><Upload size={20}/><span className="text-[10px] mt-1">Add +</span></>}</button>
                     </div>
                     <input type="file" multiple ref={galleryInputRef} className="hidden" accept="image/*" onChange={handleGalleryUpload} />
-
-                    <div className="pt-2 border-t">
-                        <label className="font-bold text-sm flex items-center gap-2 mb-1"><Video size={16}/> Vídeo (YouTube/Instagram)</label>
-                        <input placeholder="https://..." className="w-full p-2 border rounded text-xs" value={formData.videoUrl} onChange={e => setFormData({...formData, videoUrl: e.target.value})}/>
-                    </div>
+                    <div className="pt-2 border-t"><label className="font-bold text-sm flex items-center gap-2 mb-1"><Video size={16}/> Vídeo (Link)</label><input placeholder="https://..." className="w-full p-2 border rounded text-xs" value={formData.videoUrl} onChange={e => setFormData({...formData, videoUrl: e.target.value})}/></div>
                 </div>
 
-                {/* Estoque só para Delivery */}
                 {formData.salesChannel === 'delivery' && (
                     <div className="bg-gray-50 p-4 rounded border flex items-center justify-between">
                         <label className="flex items-center gap-2 text-sm font-bold"><Box size={16}/> Estoque?</label>
@@ -166,7 +137,6 @@ export default function NewProductPage() {
                 )}
             </section>
 
-            {/* Complementos (Só Delivery) */}
             {formData.salesChannel === 'delivery' && (
                 <section className="bg-white p-6 rounded border">
                     <div className="flex justify-between mb-4"><h2 className="font-bold flex gap-2"><Layers/> Complementos</h2><button type="button" onClick={quickGroup} className="text-pink-600 font-bold text-sm">+ Criar Rápido</button></div>
@@ -175,13 +145,10 @@ export default function NewProductPage() {
             )}
         </div>
 
-        {/* DIREITA - CAPA */}
         <div className="space-y-6">
             <div className="bg-white p-6 rounded border sticky top-6">
-                <label className="block text-sm font-medium mb-3">Foto de Capa</label>
-                <div className="aspect-square bg-gray-100 rounded border flex items-center justify-center overflow-hidden mb-4 cursor-pointer relative group" onClick={() => fileInputRef.current?.click()}>
-                    {uploading ? <Loader2 className="animate-spin text-pink-600"/> : formData.imageUrl ? <img src={formData.imageUrl} className="w-full h-full object-cover"/> : <div className="flex flex-col items-center text-gray-400"><Upload size={32}/><span className="text-xs mt-2">Capa Principal</span></div>}
-                </div>
+                <label className="block text-sm font-medium mb-3">Foto Principal (Capa)</label>
+                <div className="aspect-square bg-gray-100 rounded border flex items-center justify-center overflow-hidden mb-4 cursor-pointer relative group" onClick={() => fileInputRef.current?.click()}>{uploading ? <Loader2 className="animate-spin text-pink-600"/> : formData.imageUrl ? <img src={formData.imageUrl} className="w-full h-full object-cover"/> : <div className="flex flex-col items-center text-gray-400"><Upload size={32}/><span className="text-xs mt-2">Enviar Foto</span></div>}</div>
                 <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
                 <button type="submit" disabled={loading || uploading} className="w-full bg-slate-900 text-white font-bold py-3 rounded hover:bg-slate-800 disabled:opacity-50">{loading ? "Criando..." : "Salvar Produto"}</button>
             </div>
