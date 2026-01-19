@@ -6,8 +6,8 @@ import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
-import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X, CheckSquare, MessageSquare } from "lucide-react";
-import { Product, ComplementGroup, Option } from "@/types";
+import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X, CheckSquare, MessageSquare, ArrowRight } from "lucide-react";
+import { Product, ComplementGroup, Option, Category } from "@/types";
 import HeroCarousel from "@/components/HeroCarousel";
 
 export default function ShopHome() {
@@ -15,6 +15,7 @@ export default function ShopHome() {
   const { profile } = useAuth();
   
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]); // Lista de categorias
   const [loading, setLoading] = useState(true);
   
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -37,32 +38,28 @@ export default function ShopHome() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [productsSnap, groupsSnap] = await Promise.all([
+        const [productsSnap, groupsSnap, catsSnap] = await Promise.all([
             getDocs(query(collection(db, "products"), orderBy("name"))),
-            getDocs(collection(db, "complement_groups"))
+            getDocs(collection(db, "complement_groups")),
+            getDocs(query(collection(db, "categories"), orderBy("order")))
         ]);
 
-        // 1. Mapa de Produtos para Rápido Acesso
+        // Mapa de Produtos para Rápido Acesso (Hidratação)
         const productMap = new Map<string, Product>();
-        productsSnap.docs.forEach(doc => {
-            productMap.set(doc.id, { id: doc.id, ...doc.data() } as Product);
-        });
+        productsSnap.docs.forEach(doc => { productMap.set(doc.id, { id: doc.id, ...doc.data() } as Product); });
 
-        // 2. Carrega Grupos e Sincroniza (Hidratação)
+        // Hidrata grupos
         const groupsMap: Record<string, ComplementGroup> = {};
         groupsSnap.docs.forEach(doc => {
             const groupData = doc.data() as ComplementGroup;
-            
-            // AQUI ESTÁ A MÁGICA: Atualiza as opções vinculadas com dados do produto real
             const hydratedOptions = groupData.options?.map(opt => {
                 if (opt.linkedProductId && productMap.has(opt.linkedProductId)) {
                     const linkedProd = productMap.get(opt.linkedProductId)!;
                     return {
                         ...opt,
-                        name: linkedProd.name, // Atualiza nome
-                        stock: linkedProd.stock, // Usa estoque do produto
-                        isAvailable: linkedProd.isAvailable, // Usa disponibilidade do produto
-                        // Atualiza preços
+                        name: linkedProd.name,
+                        stock: linkedProd.stock,
+                        isAvailable: linkedProd.isAvailable,
                         priceAdd: linkedProd.basePrice,
                         priceAddPostpaid: linkedProd.pricePostpaid,
                         priceAddReseller: linkedProd.priceReseller
@@ -70,20 +67,20 @@ export default function ShopHome() {
                 }
                 return opt;
             });
-
             groupsMap[doc.id] = { id: doc.id, ...groupData, options: hydratedOptions || [] };
         });
 
-        // 3. Monta a lista final de produtos
+        // Lista Final de Produtos
         const items = Array.from(productMap.values()).map((p) => {
           const channel = p.salesChannel || 'delivery';
           const groupIds = p.complementGroupIds || [];
           const loadedGroups = groupIds.map((id: string) => groupsMap[id]).filter(Boolean);
-
           return { ...p, salesChannel: channel, fullGroups: loadedGroups };
         });
 
         setProducts(items);
+        setCategories(catsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Category)));
+
       } catch (error) { console.error(error); } finally { setLoading(false); }
     };
     fetchData();
@@ -92,92 +89,78 @@ export default function ShopHome() {
   const visibleProducts = products.filter(p => {
       if (p.salesChannel === 'encomenda' || p.salesChannel === 'evento') return false;
       if (!p.isAvailable) return false;
-      
       if (profile?.clientType === 'reseller') return p.availableReseller !== false;
       if (profile?.clientType === 'monthly') return p.availablePostpaid !== false;
       return p.availableStandard !== false;
   });
 
-  const groupedProducts = visibleProducts.reduce((acc, product) => {
-    const cat = product.category || "Geral";
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(product);
-    return acc;
-  }, {} as Record<string, Product[]>);
+  // --- AGRUPAMENTO POR CATEGORIA ---
+  const groupedProducts: Record<string, Product[]> = {};
+  categories.forEach(cat => groupedProducts[cat.id] = []);
+  groupedProducts['uncategorized'] = [];
 
-  const openModal = (product: Product) => {
-    if (product.stock !== null && product.stock <= 0) return;
-    setSelectedProduct(product);
-    setQuantity(1);
-    setObservation("");
-    setSelectedOptions({});
-  };
+  visibleProducts.forEach(p => {
+      const catId = p.category || 'uncategorized';
+      if (groupedProducts[catId]) {
+          groupedProducts[catId].push(p);
+      } else {
+          groupedProducts['uncategorized'].push(p);
+      }
+  });
 
-  const toggleOption = (group: ComplementGroup, option: Option) => {
-    const currentSelected = selectedOptions[group.id] || [];
-    const isAlreadySelected = currentSelected.find(o => o.id === option.id);
-    let newSelection = [];
-    if (isAlreadySelected) newSelection = currentSelected.filter(o => o.id !== option.id);
-    else {
-        if (group.maxSelection === 1) newSelection = [option];
-        else {
-            if (currentSelected.length >= group.maxSelection) return alert(`Máximo de ${group.maxSelection} opções.`);
-            newSelection = [...currentSelected, option];
-        }
-    }
-    setSelectedOptions({ ...selectedOptions, [group.id]: newSelection });
-  };
+  // Categorias que serão renderizadas (apenas as que têm produtos)
+  const catsToRender = [
+      ...categories, 
+      { id: 'uncategorized', name: 'Geral', order: 999 }
+  ].filter(c => groupedProducts[c.id] && groupedProducts[c.id].length > 0);
 
-  const calculateTotal = () => {
-    if (!selectedProduct) return 0;
-    let total = getPrice(selectedProduct);
-    Object.values(selectedOptions).flat().forEach(opt => total += getOptionPrice(opt));
-    return total * quantity;
-  };
-
-  const handleAddToCart = () => {
-    if (!selectedProduct) return;
-    const missingRequired = selectedProduct.fullGroups?.find(g => g.required && (!selectedOptions[g.id] || selectedOptions[g.id].length === 0));
-    if (missingRequired) return alert(`Grupo "${missingRequired.title}" é obrigatório.`);
-
-    let customName = selectedProduct.name;
-    const allSelectedOpts = Object.values(selectedOptions).flat();
-    if (allSelectedOpts.length > 0) { const optNames = allSelectedOpts.map(o => o.name).join(', '); customName += ` (+ ${optNames})`; }
-    if (observation.trim()) customName += ` [Obs: ${observation}]`;
-
-    addToCart({ ...selectedProduct, name: customName, price: calculateTotal() / quantity, selectedOptions: selectedOptions }, quantity);
-    setSelectedProduct(null);
-  };
+  // ... (Funções Modal e Carrinho mantidas) ...
+  const openModal = (product: Product) => { if (product.stock !== null && product.stock <= 0) return; setSelectedProduct(product); setQuantity(1); setObservation(""); setSelectedOptions({}); };
+  const toggleOption = (group: ComplementGroup, option: Option) => { const currentSelected = selectedOptions[group.id] || []; const isAlreadySelected = currentSelected.find(o => o.id === option.id); let newSelection = []; if (isAlreadySelected) newSelection = currentSelected.filter(o => o.id !== option.id); else { if (group.maxSelection === 1) newSelection = [option]; else { if (currentSelected.length >= group.maxSelection) return alert(`Máximo de ${group.maxSelection} opções.`); newSelection = [...currentSelected, option]; } } setSelectedOptions({ ...selectedOptions, [group.id]: newSelection }); };
+  const calculateTotal = () => { if (!selectedProduct) return 0; let total = getPrice(selectedProduct); Object.values(selectedOptions).flat().forEach(opt => total += getOptionPrice(opt)); return total * quantity; };
+  const handleAddToCart = () => { if (!selectedProduct) return; const missingRequired = selectedProduct.fullGroups?.find(g => g.required && (!selectedOptions[g.id] || selectedOptions[g.id].length === 0)); if (missingRequired) return alert(`Grupo "${missingRequired.title}" obrigatório.`); let customName = selectedProduct.name; const allSelectedOpts = Object.values(selectedOptions).flat(); if (allSelectedOpts.length > 0) { const optNames = allSelectedOpts.map(o => o.name).join(', '); customName += ` (+ ${optNames})`; } if (observation.trim()) customName += ` [Obs: ${observation}]`; addToCart({ ...selectedProduct, name: customName, price: calculateTotal() / quantity, selectedOptions: selectedOptions }, quantity); setSelectedProduct(null); };
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-pink-500" size={40}/></div>;
 
   return (
     <div className="space-y-10 pb-24">
       <HeroCarousel products={products} />
+      
       {visibleProducts.length === 0 ? (
         <div className="text-center text-stone-400 py-20"><ShoppingBag size={48} className="mx-auto mb-4 opacity-20"/><p>Nenhuma delícia disponível agora.</p></div>
       ) : (
-        Object.entries(groupedProducts).map(([category, items]) => (
-          <section key={category}>
-            <div className="flex items-center gap-4 mb-6"><h3 className="text-2xl font-bold text-stone-800 capitalize tracking-tight">{category}</h3><div className="h-[1px] flex-1 bg-stone-200"></div></div>
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              {items.map((product) => {
-                const isOutOfStock = product.stock !== null && product.stock <= 0;
-                return (
-                  <div key={product.id} onClick={() => openModal(product)} className={`group bg-white rounded-3xl p-3 shadow-[0_2px_15px_-3px_rgba(0,0,0,0.07),0_10px_20px_-2px_rgba(0,0,0,0.04)] hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border border-stone-50 relative overflow-hidden flex gap-4 cursor-pointer ${isOutOfStock ? 'opacity-60 grayscale' : ''}`}>
-                    {isOutOfStock && <div className="absolute inset-0 z-20 bg-stone-100/50 backdrop-blur-[1px] flex items-center justify-center"><span className="bg-stone-800 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest">Esgotado</span></div>}
-                    <div className="w-28 h-28 rounded-2xl overflow-hidden flex-shrink-0 bg-stone-100 relative shadow-inner">{product.imageUrl ? <img src={product.imageUrl} className="w-full h-full object-cover group-hover:scale-110 transition duration-500" /> : <ImageOff className="m-auto mt-10 text-stone-300" size={24} />}</div>
-                    <div className="flex-1 flex flex-col justify-between py-1">
-                        <div><h4 className="font-bold text-stone-800 text-lg leading-tight line-clamp-2 mb-1">{product.name}</h4><p className="text-xs text-stone-500 line-clamp-2 leading-relaxed">{product.description}</p></div>
-                        <div className="flex justify-between items-end mt-2"><div className="flex flex-col"><span className="text-[10px] text-stone-400 font-bold uppercase">A partir de</span><span className="font-bold text-lg text-emerald-600">{getPrice(product).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></div>{!isOutOfStock && <button className="bg-stone-900 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:bg-pink-600 transition-colors"><Plus size={16} /></button>}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        ))
+        catsToRender.map((category) => {
+            // Ordenação: Com Estoque primeiro, depois Sem Estoque
+            const items = groupedProducts[category.id].sort((a, b) => {
+                const aStock = a.stock !== null && a.stock <= 0 ? 0 : 1;
+                const bStock = b.stock !== null && b.stock <= 0 ? 0 : 1;
+                return bStock - aStock;
+            });
+
+            return (
+              <section key={category.id}>
+                <div className="flex items-center gap-4 mb-6"><h3 className="text-2xl font-bold text-stone-800 capitalize tracking-tight">{category.name}</h3><div className="h-[1px] flex-1 bg-stone-200"></div></div>
+                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                  {items.map((product) => {
+                    const isOutOfStock = product.stock !== null && product.stock <= 0;
+                    return (
+                      <div key={product.id} onClick={() => openModal(product)} className={`group bg-white rounded-3xl p-3 shadow-[0_2px_15px_-3px_rgba(0,0,0,0.07),0_10px_20px_-2px_rgba(0,0,0,0.04)] hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border border-stone-50 relative overflow-hidden flex gap-4 cursor-pointer ${isOutOfStock ? 'opacity-60 grayscale' : ''}`}>
+                        {isOutOfStock && <div className="absolute inset-0 z-20 bg-stone-100/50 backdrop-blur-[1px] flex items-center justify-center"><span className="bg-stone-800 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest">Esgotado</span></div>}
+                        <div className="w-28 h-28 rounded-2xl overflow-hidden flex-shrink-0 bg-stone-100 relative shadow-inner">{product.imageUrl ? <img src={product.imageUrl} className="w-full h-full object-cover group-hover:scale-110 transition duration-500" /> : <ImageOff className="m-auto mt-10 text-stone-300" size={24} />}</div>
+                        <div className="flex-1 flex flex-col justify-between py-1">
+                            <div><h4 className="font-bold text-stone-800 text-lg leading-tight line-clamp-2 mb-1">{product.name}</h4><p className="text-xs text-stone-500 line-clamp-2 leading-relaxed">{product.description}</p></div>
+                            <div className="flex justify-between items-end mt-2"><div className="flex flex-col"><span className="text-[10px] text-stone-400 font-bold uppercase">A partir de</span><span className="font-bold text-lg text-emerald-600">{getPrice(product).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></div>{!isOutOfStock && <button className="bg-stone-900 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:bg-pink-600 transition-colors"><Plus size={16} /></button>}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+        })
       )}
+      
+      {/* Modal igual... */}
       {selectedProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 p-4 animate-in fade-in duration-300 backdrop-blur-sm">
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>

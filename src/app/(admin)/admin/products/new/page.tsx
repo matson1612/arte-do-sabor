@@ -4,15 +4,19 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Upload, Box, Layers, Loader2, Store, Video, Image as ImageIcon, X, Star } from "lucide-react";
-import { Product, ComplementGroup, SalesChannel } from "@/types";
+import { Product, ComplementGroup, SalesChannel, Category } from "@/types";
 import { createProduct } from "@/services/productService";
 import { getAllGroups, createGroup } from "@/services/complementService";
 import { uploadImage } from "@/services/uploadService";
+import { collection, getDocs, query, orderBy } from "firebase/firestore"; 
+import { db } from "@/lib/firebase";
 
 export default function NewProductPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [allMasterGroups, setAllMasterGroups] = useState<ComplementGroup[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]); // Lista de categorias
+  
   const [manageStock, setManageStock] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [galleryUploading, setGalleryUploading] = useState(false);
@@ -21,8 +25,9 @@ export default function NewProductPage() {
 
   const [formData, setFormData] = useState<Partial<Product>>({
     name: "", description: "", 
-    basePrice: 0, pricePostpaid: 0, priceReseller: 0, // <--- CAMPO NOVO
-    imageUrl: "", category: "bolos", 
+    basePrice: 0, pricePostpaid: 0, priceReseller: 0, // Campos de preço
+    imageUrl: "", 
+    category: "", // ID da categoria
     isAvailable: true, availableStandard: true, availablePostpaid: true, availableReseller: true,
     stock: null, complementGroupIds: [],
     salesChannel: 'delivery',
@@ -31,7 +36,24 @@ export default function NewProductPage() {
 
   const isShowcase = formData.salesChannel === 'encomenda' || formData.salesChannel === 'evento';
 
-  useEffect(() => { getAllGroups().then(setAllMasterGroups).catch(console.error); }, []);
+  useEffect(() => {
+    const loadInit = async () => {
+        try {
+            const [groupsData, catsSnap] = await Promise.all([
+                getAllGroups(),
+                getDocs(query(collection(db, "categories"), orderBy("order")))
+            ]);
+            setAllMasterGroups(groupsData);
+            
+            const cats = catsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Category));
+            setCategories(cats);
+            
+            // Define categoria padrão se houver
+            if (cats.length > 0) setFormData(prev => ({ ...prev, category: cats[0].id }));
+        } catch (e) { console.error(e); }
+    };
+    loadInit();
+  }, []);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
@@ -59,9 +81,11 @@ export default function NewProductPage() {
         description: formData.description || "",
         basePrice: isShowcase ? 0 : (Number(formData.basePrice) || 0),
         pricePostpaid: isShowcase ? 0 : (Number(formData.pricePostpaid) || 0),
-        priceReseller: isShowcase ? 0 : (Number(formData.priceReseller) || 0), // <--- SALVAR
+        priceReseller: isShowcase ? 0 : (Number(formData.priceReseller) || 0),
         imageUrl: formData.imageUrl || "",
-        category: formData.category || "bolos",
+        
+        category: formData.category || (categories[0]?.id || "geral"),
+        
         isAvailable: formData.isAvailable ?? true,
         availableStandard: true,
         availablePostpaid: true,
@@ -79,7 +103,7 @@ export default function NewProductPage() {
   };
 
   const quickGroup = async () => { 
-    const name = prompt("Nome:"); if(name) { try { const id = await createGroup({title:name, required:false, maxSelection:1, options:[]}); setAllMasterGroups([...allMasterGroups, {id, title:name, required:false, maxSelection:1, options:[]}]); setFormData(p=>({...p, complementGroupIds:[...(p.complementGroupIds||[]), id]})); } catch(e){ alert("Erro"); }} 
+    const name = prompt("Nome do Grupo:"); if(name) { try { const id = await createGroup({title:name, required:false, maxSelection:1, options:[]}); setAllMasterGroups([...allMasterGroups, {id, title:name, required:false, maxSelection:1, options:[]}]); setFormData(p=>({...p, complementGroupIds:[...(p.complementGroupIds||[]), id]})); } catch(e){ alert("Erro"); }} 
   };
 
   return (
@@ -108,7 +132,6 @@ export default function NewProductPage() {
 
                 <input placeholder="Nome do Produto" required className="w-full p-3 border rounded" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})}/>
                 
-                {/* PREÇOS ATUALIZADOS COM REVENDA */}
                 {!isShowcase && (
                     <div className="grid grid-cols-3 gap-4 bg-gray-50 p-4 rounded border animate-in fade-in">
                         <div><label className="text-xs font-bold text-green-700 uppercase mb-1 block">R$ Padrão</label><input type="number" step="0.01" required className="w-full p-3 border rounded border-green-200" value={formData.basePrice} onChange={e => setFormData({...formData, basePrice: parseFloat(e.target.value)})}/></div>
@@ -117,7 +140,16 @@ export default function NewProductPage() {
                     </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-4"><select className="w-full p-3 border rounded bg-white" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}><option value="bolos">Bolos</option><option value="doces">Doces</option><option value="salgados">Salgados</option><option value="bebidas">Bebidas</option></select></div>
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="text-xs font-bold uppercase text-gray-500 mb-1 block">Categoria</label>
+                        <select className="w-full p-3 border rounded bg-white" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
+                            {categories.length === 0 && <option value="">Sem categorias (Crie no Admin)</option>}
+                            {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+                        </select>
+                    </div>
+                </div>
+                
                 <textarea rows={3} placeholder="Descrição completa..." className="w-full p-3 border rounded" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})}/>
                 
                 <div className="bg-gray-50 p-4 rounded border space-y-4">

@@ -1,16 +1,22 @@
 // src/types/index.ts
 
-export type ClientType = 'standard' | 'monthly' | 'reseller'; // <--- NOVO TIPO
-
+export type ClientType = 'standard' | 'monthly' | 'reseller';
 export type OrderStatus = 'em_aberto' | 'produzindo' | 'entrega' | 'finalizado' | 'cancelado';
 export type SalesChannel = 'delivery' | 'encomenda' | 'evento';
+
+// --- NOVA INTERFACE DE CATEGORIA ---
+export interface Category {
+  id: string;
+  name: string;
+  order: number; // Para definir a sequência no site
+}
 
 export interface Option {
   id: string;
   name: string;
   priceAdd: number;
   priceAddPostpaid?: number; 
-  priceAddReseller?: number; // <--- NOVO PREÇO
+  priceAddReseller?: number; 
   isAvailable: boolean;
   stock: number | null;
   linkedProductId?: string; 
@@ -30,15 +36,15 @@ export interface Product {
   description: string;
   basePrice: number;
   pricePostpaid?: number;
-  priceReseller?: number; // <--- NOVO PREÇO
+  priceReseller?: number; // Preço Revenda
   imageUrl: string;
-  category: string;
-  isAvailable: boolean;
   
-  // Disponibilidade por perfil
+  category: string; // ID da Categoria
+  
+  isAvailable: boolean;
   availableStandard?: boolean;
   availablePostpaid?: boolean;
-  availableReseller?: boolean; // <--- NOVA DISPONIBILIDADE
+  availableReseller?: boolean;
 
   stock: number | null;
   complementGroupIds: string[];
