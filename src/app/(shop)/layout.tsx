@@ -25,7 +25,7 @@ export default function ShopLayout({ children }: { children: React.ReactNode }) 
                 <img 
                     src="/faixa.png" 
                     alt="" 
-                    className="-rotate-90 min-w-[150vh] h-24 object-repeat object-center" 
+                    className="-rotate-90 scale-[1.6] min-w-[150vh] h-32 object-repeat object-center"
                 />
             </div>
         </div>
@@ -37,7 +37,7 @@ export default function ShopLayout({ children }: { children: React.ReactNode }) 
                 <img 
                     src="/faixa.png" 
                     alt="" 
-                    className="rotate-90 min-w-[150vh] h-24 object-repeat object-center" 
+                    className="-rotate-90 scale-[1.8] min-w-[150vh] h-40 object-repeat object-center"
                 />
             </div>
         </div>
