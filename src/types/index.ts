@@ -73,6 +73,20 @@ export interface CartItem extends Product {
   finalPrice: number;
 }
 
+// --- ATUALIZAÇÃO NO PERFIL E ENDEREÇO ---
+export interface UserAddress {
+  id: string;
+  nickname: string; // Ex: "Casa", "Trabalho"
+  regionType: 'plano_diretor' | 'outras_localidades';
+  sectorName?: string; // Nome do setor (se for outras localidades)
+  street: string;
+  number: string;
+  district: string;
+  complement?: string;
+  cep: string;
+  location?: { lat: number; lng: number }; // Coordenadas salvas
+}
+
 export interface UserProfile {
   uid: string;
   name: string;
@@ -81,7 +95,8 @@ export interface UserProfile {
   clientType?: ClientType; 
   createdAt: any;
   phone?: string;
-  address?: any;
+  savedAddresses?: UserAddress[]; // Agora tipado corretamente
+  address?: any; // Legado
 }
 
 export interface Order {
@@ -104,13 +119,27 @@ export interface Order {
   description?: string;
 }
 
-// --- NOVAS CONFIGURAÇÕES DE LOJA ---
+// --- CONFIGURAÇÕES DE LOJA E FRETE ---
 
 export interface PaymentMethodConfig {
   active: boolean;
   label: string;
-  feePercent?: number; // Taxa (%)
-  discountPercent?: number; // Desconto (%)
+  feePercent?: number;
+  discountPercent?: number;
+}
+
+export interface ShippingDistanceRule {
+  minKm: number;
+  maxKm: number;
+  price: number;
+}
+
+export interface ShippingFixedArea {
+  id: string;
+  name: string;
+  price: number;
+  type: 'fixed' | 'km_plus_tax';
+  tax?: number; // Taxa extra se for km_plus_tax
 }
 
 export interface StoreSettings {
@@ -119,19 +148,19 @@ export interface StoreSettings {
   // Dados Gerais
   storeName: string;
   cnpj: string;
-  email: string; // Email do responsável
-  whatsapp: string; // Número de pedidos
+  email: string; 
+  whatsapp: string;
   
-  // Endereço e Localização
+  // Endereço Base
   address: {
     street: string;
     number: string;
     district: string;
     city: string;
     state: string;
-    cep?: string; // CEP adicionado
+    cep: string;
   };
-  location: { // Mantendo compatibilidade com seu mapa existente
+  location: { 
     lat: number;
     lng: number;
   };
@@ -143,21 +172,18 @@ export interface StoreSettings {
     city: string;
   };
 
-  // Configuração de Pagamentos
   paymentMethods: {
     pix: PaymentMethodConfig;
     money: PaymentMethodConfig;
-    link_debit: PaymentMethodConfig; // Link Débito
-    link_credit: PaymentMethodConfig; // Link Crédito
-    monthly: PaymentMethodConfig; // Conta Mensal
+    link_debit: PaymentMethodConfig;
+    link_credit: PaymentMethodConfig;
+    monthly: PaymentMethodConfig;
   };
 
-  // Frete
+  // Frete Avançado
   shipping: {
-    type: 'fixed' | 'distance'; // Fixo ou Por KM
-    fixedPrice: number; 
-    pricePerKm: number; 
-    minOrderValue?: number; // Pedido mínimo
-    freeShippingAbove?: number; // Frete grátis acima de
+    distanceTable: ShippingDistanceRule[];
+    fixedAreas: ShippingFixedArea[];
+    freeShippingAbove?: number;
   };
 }
