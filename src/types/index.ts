@@ -4,6 +4,8 @@ export type ClientType = 'standard' | 'monthly' | 'reseller';
 export type OrderStatus = 'em_aberto' | 'produzindo' | 'entrega' | 'finalizado' | 'cancelado';
 export type SalesChannel = 'delivery' | 'encomenda' | 'evento';
 
+export type ExpenseCategory = 'insumos' | 'embalagens' | 'contas_fixas' | 'pessoal' | 'marketing' | 'manutencao' | 'outros';
+
 // --- NOVA INTERFACE DE CATEGORIA ---
 export interface Category {
   id: string;
@@ -94,4 +96,13 @@ export interface Order {
   isManual?: boolean;
   contractUrl?: string;
   description?: string;
+}
+
+export interface Expense {
+  id: string;
+  description: string;
+  amount: number;
+  category: ExpenseCategory;
+  date: any; // Timestamp
+  createdAt: any;
 }

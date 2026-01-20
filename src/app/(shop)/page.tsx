@@ -6,7 +6,7 @@ import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
-import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X, CheckSquare, MessageSquare, ArrowRight, AlertCircle } from "lucide-react";
+import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X, CheckSquare, MessageSquare, AlertCircle } from "lucide-react";
 import { Product, ComplementGroup, Option, Category } from "@/types";
 import HeroCarousel from "@/components/HeroCarousel";
 
@@ -109,6 +109,7 @@ export default function ShopHome() {
       { id: 'uncategorized', name: 'Geral', order: 999 }
   ].filter(c => groupedProducts[c.id] && groupedProducts[c.id].length > 0);
 
+  // --- LÓGICA DO MODAL ---
   const openModal = (product: Product) => {
     setSelectedProduct(product);
     setQuantity(1);
@@ -194,16 +195,20 @@ export default function ShopHome() {
         })
       )}
       
-      {/* --- MODAL RESPONSIVO (CORRIGIDO) --- */}
+      {/* --- MODAL COM TAMANHO FIXO E POSIÇÃO CORRETA --- */}
       {selectedProduct && (
-        <div className="fixed inset-0 z-[60] flex items-center md:items-start justify-center bg-stone-900/60 p-4 md:pt-24 animate-in fade-in duration-300 backdrop-blur-sm">
+        // z-[100]: Garante que fique acima de TUDO (incluindo menu).
+        // pt-24 pb-4: Cria a área segura abaixo do menu (80px + folga) e acima do fim da tela.
+        // items-center: Centraliza o container na área útil.
+        <div className="fixed inset-0 z-[100] flex justify-center items-center bg-stone-900/60 p-4 pt-24 pb-4 animate-in fade-in duration-300 backdrop-blur-sm">
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
             
-            {/* Ajuste de Altura Máxima para Mobile (85vh) vs Desktop (calc) */}
-            <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-8 duration-300 max-h-[85vh] md:max-h-[calc(100vh-120px)] overflow-y-auto flex flex-col">
+            {/* h-full: Ocupa toda a altura disponível definida pelo padding do pai.
+                Isto cria o efeito "tamanho fixo" que respeita os limites. */}
+            <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-8 duration-300 flex flex-col h-full">
                 
-                {/* Imagem do Produto: Menor no Mobile (h-48), Maior no PC (h-64) */}
-                <div className="h-48 md:h-64 bg-stone-100 relative flex-shrink-0">
+                {/* Imagem */}
+                <div className="h-48 md:h-56 bg-stone-100 relative flex-shrink-0">
                     <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-white/80 backdrop-blur text-stone-800 p-2 rounded-full hover:bg-white shadow-sm transition"><X size={20}/></button>
                     {selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-stone-300"><ImageOff size={40}/></div>}
                     
@@ -218,6 +223,7 @@ export default function ShopHome() {
                     <div className="absolute bottom-0 inset-x-0 h-20 bg-gradient-to-t from-white to-transparent"></div>
                 </div>
 
+                {/* Conteúdo com Scroll */}
                 <div className="p-6 pt-0 space-y-6 flex-1 overflow-y-auto">
                     <div>
                         <h2 className="text-2xl font-bold text-stone-800 mb-1">{selectedProduct.name}</h2>
@@ -245,7 +251,8 @@ export default function ShopHome() {
                     <div><label className="font-bold text-stone-700 text-sm mb-2 flex items-center gap-2"><MessageSquare size={16}/> Alguma observação?</label><textarea className="w-full p-3 border border-stone-200 rounded-xl bg-stone-50 focus:bg-white focus:ring-2 focus:ring-pink-100 text-sm outline-none transition" rows={2} placeholder="Ex: Tirar cebola, caprichar no molho..." value={observation} onChange={e => setObservation(e.target.value)}/></div>
                 </div>
 
-                <div className="p-4 bg-white border-t border-stone-100 flex items-center gap-4">
+                {/* Footer Fixo */}
+                <div className="p-4 bg-white border-t border-stone-100 flex items-center gap-4 flex-shrink-0">
                     {(() => {
                         const isOutOfStock = selectedProduct.stock !== null && selectedProduct.stock <= 0;
                         return (
