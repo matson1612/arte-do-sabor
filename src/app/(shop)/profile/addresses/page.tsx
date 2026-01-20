@@ -1,162 +1,196 @@
 // src/app/(shop)/profile/addresses/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
-import { doc, getDoc, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { ArrowLeft, Plus, MapPin, Trash2, Search, Loader2, Save, X } from "lucide-react";
 import Link from "next/link";
-import { ArrowLeft, MapPin, Plus, Trash2, Loader2, Save, X } from "lucide-react";
+import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
+import { UserAddress, StoreSettings } from "@/types";
+
+// ⚠️ Mantenha sua chave aqui
+const GOOGLE_MAPS_API_KEY = "AIzaSyBy365txh8nJ9JuGfvyPGdW5-angEXWBj8"; 
+const DEFAULT_CENTER = { lat: -10.183760, lng: -48.333650 };
 
 export default function AddressesPage() {
   const { user } = useAuth();
-  const [addresses, setAddresses] = useState<any[]>([]);
+  const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_MAPS_API_KEY });
+
   const [loading, setLoading] = useState(true);
-  const [isAdding, setIsAdding] = useState(false);
+  const [addresses, setAddresses] = useState<UserAddress[]>([]);
+  const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
+
+  // Estado do Modal
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [newAddr, setNewAddr] = useState<Partial<UserAddress>>({
+      regionType: 'plano_diretor',
+      street: "", number: "", district: "", complement: "", nickname: "Minha Casa", cep: ""
+  });
+  const [addrMapLoc, setAddrMapLoc] = useState(DEFAULT_CENTER);
   const [saving, setSaving] = useState(false);
 
-  // Form
-  const [newAddress, setNewAddress] = useState({
-    nickname: "", street: "", number: "", district: "", complement: "", zip: ""
-  });
-
+  // Carregar Dados
   useEffect(() => {
-    if (user) loadAddresses();
+    const init = async () => {
+      try {
+        // 1. Configs da Loja (Para pegar os setores/bairros)
+        const settingsSnap = await getDoc(doc(db, "store_settings", "config"));
+        if (settingsSnap.exists()) setStoreSettings(settingsSnap.data() as StoreSettings);
+
+        // 2. Endereços do Usuário
+        if (user) {
+            const userSnap = await getDoc(doc(db, "users", user.uid));
+            if (userSnap.exists() && userSnap.data().savedAddresses) {
+                setAddresses(userSnap.data().savedAddresses);
+            }
+        }
+      } catch (e) { console.error(e); } 
+      finally { setLoading(false); }
+    };
+    init();
   }, [user]);
 
-  const loadAddresses = async () => {
-    try {
-        const snap = await getDoc(doc(db, "users", user!.uid));
-        if (snap.exists() && snap.data().savedAddresses) {
-            setAddresses(snap.data().savedAddresses);
-        }
-    } catch (e) { console.error(e); } finally { setLoading(false); }
-  };
-
+  // Funções do Modal (Igual ao Carrinho)
   const handleBuscaCep = async () => {
-      const cep = newAddress.zip.replace(/\D/g, '');
-      if (cep.length !== 8) return;
+      if(!newAddr.cep || newAddr.cep.length < 8) return alert("CEP Inválido");
       try {
-          const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+          const res = await fetch(`https://viacep.com.br/ws/${newAddr.cep.replace(/\D/g,'')}/json/`);
           const data = await res.json();
-          if (!data.erro) {
-              setNewAddress(prev => ({ ...prev, street: data.logradouro, district: data.bairro }));
-          }
-      } catch (e) {}
+          if(!data.erro) {
+              setNewAddr(prev => ({...prev, street: data.logradouro, district: data.bairro}));
+              if(window.google) {
+                  const geocoder = new window.google.maps.Geocoder();
+                  geocoder.geocode({ address: newAddr.cep }, (results, status) => {
+                      if(status === 'OK' && results?.[0]) {
+                          const loc = results[0].geometry.location;
+                          setAddrMapLoc({ lat: loc.lat(), lng: loc.lng() });
+                      }
+                  });
+              }
+          } else { alert("CEP não encontrado"); }
+      } catch(e) { alert("Erro ao buscar CEP"); }
   };
 
   const handleSave = async () => {
-      if (!newAddress.street || !newAddress.number || !newAddress.district || !newAddress.nickname) {
-          return alert("Preencha os campos obrigatórios (Apelido, Rua, Número, Bairro)");
-      }
+      if(!newAddr.street || !newAddr.number) return alert("Preencha o endereço completo");
+      if(!newAddr.nickname) return alert("Dê um nome para o local (Ex: Casa)");
+      
       setSaving(true);
-      const addressObj = { ...newAddress, id: crypto.randomUUID() };
       try {
-          await updateDoc(doc(db, "users", user!.uid), {
-              savedAddresses: arrayUnion(addressObj)
-          });
-          setAddresses([...addresses, addressObj]);
-          setIsAdding(false);
-          setNewAddress({ nickname: "", street: "", number: "", district: "", complement: "", zip: "" });
-      } catch (e) { alert("Erro ao salvar."); } finally { setSaving(false); }
+          const addressData: UserAddress = {
+              id: crypto.randomUUID(),
+              ...newAddr as UserAddress,
+              location: addrMapLoc
+          };
+
+          const updatedList = [...addresses, addressData];
+          
+          if(user) {
+              await updateDoc(doc(db, "users", user.uid), { savedAddresses: updatedList });
+              setAddresses(updatedList);
+              setIsModalOpen(false);
+              setNewAddr({ regionType: 'plano_diretor', street: "", number: "", district: "", complement: "", nickname: "", cep: "" });
+          }
+      } catch (e) { alert("Erro ao salvar"); }
+      finally { setSaving(false); }
   };
 
-  const handleDelete = async (addr: any) => {
-      if (!confirm("Excluir este endereço?")) return;
+  const handleDelete = async (id: string) => {
+      if(!confirm("Excluir este endereço?")) return;
       try {
-          // No Firestore arrayRemove exige o objeto exato
-          await updateDoc(doc(db, "users", user!.uid), {
-              savedAddresses: arrayRemove(addr)
-          });
-          setAddresses(prev => prev.filter(a => a.id !== addr.id));
-      } catch (e) { alert("Erro ao excluir."); }
+          const updatedList = addresses.filter(a => a.id !== id);
+          if(user) {
+              await updateDoc(doc(db, "users", user.uid), { savedAddresses: updatedList });
+              setAddresses(updatedList);
+          }
+      } catch(e) { alert("Erro ao excluir"); }
   };
 
-  if (loading) return <div className="p-20 flex justify-center"><Loader2 className="animate-spin text-orange-500"/></div>;
+  if (loading) return <div className="flex justify-center p-20"><Loader2 className="animate-spin text-pink-600"/></div>;
 
   return (
-    <div className="max-w-2xl mx-auto pb-20">
-      <div className="flex items-center gap-4 mb-8">
-          <Link href="/profile" className="p-2 bg-white rounded-full border border-stone-200 text-stone-500 hover:text-stone-800 transition"><ArrowLeft size={20}/></Link>
-          <h1 className="text-2xl font-bold text-stone-800">Meus Endereços</h1>
-      </div>
+    <div className="max-w-2xl mx-auto p-4 pb-20">
+        <div className="flex items-center gap-4 mb-6">
+            <Link href="/profile" className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft/></Link>
+            <h1 className="text-xl font-bold text-slate-800">Meus Endereços</h1>
+        </div>
 
-      <div className="grid gap-4">
-          {/* Botão Novo Endereço */}
-          {!isAdding && (
-              <button onClick={() => setIsAdding(true)} className="w-full bg-stone-800 text-white p-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-stone-700 transition shadow-lg shadow-stone-200">
-                  <Plus size={20}/> Cadastrar Novo Endereço
-              </button>
-          )}
+        <div className="space-y-4">
+            {addresses.map(addr => (
+                <div key={addr.id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex justify-between items-start">
+                    <div className="flex gap-3">
+                        <div className="mt-1 text-pink-600"><MapPin size={20}/></div>
+                        <div>
+                            <h3 className="font-bold text-slate-800 uppercase text-sm">{addr.nickname}</h3>
+                            <p className="text-sm text-slate-600 mt-1">{addr.street}, {addr.number}</p>
+                            <p className="text-xs text-slate-500">{addr.district} • {addr.regionType === 'plano_diretor' ? 'Plano Diretor' : addr.sectorName}</p>
+                        </div>
+                    </div>
+                    <button onClick={() => handleDelete(addr.id)} className="text-gray-400 hover:text-red-500 p-2"><Trash2 size={18}/></button>
+                </div>
+            ))}
 
-          {/* Formulário de Cadastro */}
-          {isAdding && (
-              <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-lg animate-in slide-in-from-top-4">
-                  <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><MapPin size={20} className="text-orange-500"/> Novo Local</h3>
-                  <div className="space-y-3">
-                      <div>
-                          <label className="text-xs font-bold text-stone-400 uppercase">Salvar como (Ex: Casa, Trabalho)</label>
-                          <input className="w-full p-3 border rounded-xl bg-stone-50" placeholder="Apelido do local" value={newAddress.nickname} onChange={e => setNewAddress({...newAddress, nickname: e.target.value})} />
-                      </div>
-                      <div className="flex gap-3">
-                          <div className="w-32">
-                              <label className="text-xs font-bold text-stone-400 uppercase">CEP</label>
-                              <input className="w-full p-3 border rounded-xl" placeholder="00000-000" value={newAddress.zip} onChange={e => setNewAddress({...newAddress, zip: e.target.value})} onBlur={handleBuscaCep}/>
-                          </div>
-                          <div className="flex-1">
-                              <label className="text-xs font-bold text-stone-400 uppercase">Bairro</label>
-                              <input className="w-full p-3 border rounded-xl bg-stone-50" placeholder="Bairro" value={newAddress.district} onChange={e => setNewAddress({...newAddress, district: e.target.value})} />
-                          </div>
-                      </div>
-                      <div className="flex gap-3">
-                          <div className="flex-1">
-                              <label className="text-xs font-bold text-stone-400 uppercase">Rua</label>
-                              <input className="w-full p-3 border rounded-xl bg-stone-50" placeholder="Nome da rua" value={newAddress.street} onChange={e => setNewAddress({...newAddress, street: e.target.value})} />
-                          </div>
-                          <div className="w-24">
-                              <label className="text-xs font-bold text-stone-400 uppercase">Número</label>
-                              <input className="w-full p-3 border rounded-xl" placeholder="Nº" value={newAddress.number} onChange={e => setNewAddress({...newAddress, number: e.target.value})} />
-                          </div>
-                      </div>
-                      <div>
-                          <label className="text-xs font-bold text-stone-400 uppercase">Complemento (Opcional)</label>
-                          <input className="w-full p-3 border rounded-xl bg-stone-50" placeholder="Apto, Bloco, Ponto de referência..." value={newAddress.complement} onChange={e => setNewAddress({...newAddress, complement: e.target.value})} />
-                      </div>
-                  </div>
-                  <div className="flex gap-3 mt-6">
-                      <button onClick={() => setIsAdding(false)} className="flex-1 py-3 border border-stone-200 rounded-xl font-bold text-stone-500 hover:bg-stone-50">Cancelar</button>
-                      <button onClick={handleSave} disabled={saving} className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 flex items-center justify-center gap-2">
-                          {saving ? <Loader2 className="animate-spin"/> : <><Save size={18}/> Salvar</>}
-                      </button>
-                  </div>
-              </div>
-          )}
+            <button onClick={() => setIsModalOpen(true)} className="w-full py-4 border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center gap-2 text-slate-500 font-bold hover:bg-gray-50 hover:border-pink-300 hover:text-pink-600 transition">
+                <Plus size={20}/> Cadastrar Novo Endereço
+            </button>
+        </div>
 
-          {/* Lista de Endereços */}
-          {addresses.length === 0 && !isAdding && (
-              <div className="text-center py-10 text-stone-400 bg-white rounded-3xl border border-dashed">
-                  <MapPin size={40} className="mx-auto mb-2 opacity-30"/>
-                  <p>Nenhum endereço salvo.</p>
-              </div>
-          )}
+        {/* MODAL PADRONIZADO (Igual ao Cart) */}
+        {isModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
+                <div className="bg-white w-full max-w-md rounded-2xl p-6 h-[85vh] sm:h-auto overflow-y-auto animate-in slide-in-from-bottom shadow-2xl relative">
+                    <button onClick={() => setIsModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X/></button>
+                    <h2 className="font-bold text-lg mb-6 text-slate-800">Novo Endereço</h2>
+                    
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Salvar como</label>
+                            <input className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-pink-100" placeholder="Ex: Casa, Trabalho" value={newAddr.nickname} onChange={e => setNewAddr({...newAddr, nickname: e.target.value})} />
+                        </div>
 
-          {addresses.map((addr) => (
-              <div key={addr.id} className="bg-white p-5 rounded-3xl border border-stone-100 shadow-sm flex justify-between items-center group hover:border-orange-200 transition">
-                  <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-full bg-orange-50 text-orange-500 flex items-center justify-center">
-                          <MapPin size={20}/>
-                      </div>
-                      <div>
-                          <h4 className="font-bold text-stone-800">{addr.nickname}</h4>
-                          <p className="text-sm text-stone-500">{addr.street}, {addr.number} - {addr.district}</p>
-                      </div>
-                  </div>
-                  <button onClick={() => handleDelete(addr)} className="p-2 text-stone-300 hover:text-red-500 hover:bg-red-50 rounded-full transition">
-                      <Trash2 size={18}/>
-                  </button>
-              </div>
-          ))}
-      </div>
+                        {/* SELETOR DE REGIÃO */}
+                        <div className="flex bg-gray-100 p-1 rounded-lg">
+                            <button onClick={() => setNewAddr({...newAddr, regionType: 'plano_diretor', sectorName: undefined})} className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${newAddr.regionType === 'plano_diretor' ? 'bg-white shadow text-pink-600' : 'text-gray-500'}`}>Plano Diretor</button>
+                            <button onClick={() => setNewAddr({...newAddr, regionType: 'outras_localidades'})} className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${newAddr.regionType === 'outras_localidades' ? 'bg-white shadow text-pink-600' : 'text-gray-500'}`}>Outras Regiões</button>
+                        </div>
+
+                        {newAddr.regionType === 'plano_diretor' ? (
+                            <div className="flex gap-2">
+                                <input className="w-full p-3 border rounded-lg outline-none" placeholder="CEP (Busca Automática)" value={newAddr.cep} onChange={e => setNewAddr({...newAddr, cep: e.target.value})} maxLength={9}/>
+                                <button onClick={handleBuscaCep} className="bg-slate-800 text-white px-4 rounded-lg"><Search size={20}/></button>
+                            </div>
+                        ) : (
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Selecione o Setor</label>
+                                <select className="w-full p-3 border rounded-lg bg-white outline-none" value={newAddr.sectorName || ''} onChange={e => setNewAddr({...newAddr, sectorName: e.target.value})}>
+                                    <option value="">-- Selecione na lista --</option>
+                                    {storeSettings?.shipping.fixedAreas.map(area => (
+                                        <option key={area.id} value={area.name}>{area.name} (+R$ {area.price})</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+
+                        <div><input className="w-full p-3 border rounded-lg bg-gray-50 outline-none" placeholder="Rua / Avenida" value={newAddr.street} onChange={e => setNewAddr({...newAddr, street: e.target.value})} /></div>
+                        <div className="flex gap-2">
+                            <input className="w-28 p-3 border rounded-lg outline-none" placeholder="Número" value={newAddr.number} onChange={e => setNewAddr({...newAddr, number: e.target.value})} />
+                            <input className="flex-1 p-3 border rounded-lg outline-none" placeholder="Complemento (Opcional)" value={newAddr.complement} onChange={e => setNewAddr({...newAddr, complement: e.target.value})} />
+                        </div>
+
+                        <div className="h-48 rounded-xl overflow-hidden border relative bg-gray-100">
+                            {isLoaded && <GoogleMap mapContainerStyle={{width:'100%',height:'100%'}} center={addrMapLoc} zoom={16} onClick={(e) => e.latLng && setAddrMapLoc({lat: e.latLng.lat(), lng: e.latLng.lng()})}><Marker position={addrMapLoc} draggable onDragEnd={(e) => e.latLng && setAddrMapLoc({lat: e.latLng.lat(), lng: e.latLng.lng()})}/></GoogleMap>}
+                            <div className="absolute bottom-2 left-0 w-full text-center pointer-events-none"><span className="bg-white/90 text-[10px] font-bold px-3 py-1 rounded shadow text-slate-800">Arraste o pino para a posição exata</span></div>
+                        </div>
+
+                        <button onClick={handleSave} disabled={saving} className="w-full py-4 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition flex justify-center items-center gap-2">
+                            {saving ? <Loader2 className="animate-spin"/> : <><Save size={20}/> Salvar Endereço</>}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
     </div>
   );
 }
