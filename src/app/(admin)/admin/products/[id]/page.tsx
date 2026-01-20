@@ -5,10 +5,12 @@ import { useEffect, useState, use, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { ArrowLeft, Save, Upload, Box, Layers, Pencil, Eye, X, Trash2, Loader2 } from "lucide-react";
-import { Product, ComplementGroup, Option } from "@/types";
+import { Product, ComplementGroup, Option, Category } from "@/types";
 import { getProductById, updateProduct, getProducts } from "@/services/productService";
 import { getAllGroups, createGroup, updateGroup } from "@/services/complementService";
 import { uploadImage } from "@/services/uploadService"; // ImgBB
+import { db } from "@/lib/firebase";
+import { collection, getDocs, query, orderBy } from "firebase/firestore";
 
 interface EditPageProps { params: Promise<{ id: string }>; }
 
@@ -24,13 +26,14 @@ export default function EditProductPage({ params }: EditPageProps) {
 
   const [allMasterGroups, setAllMasterGroups] = useState<ComplementGroup[]>([]);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]); // <--- Lista de Categorias do Banco
   
   const [manageStock, setManageStock] = useState(false);
   
   const [formData, setFormData] = useState<Product>({
     id: "", name: "", description: "", 
     basePrice: 0, pricePostpaid: 0, 
-    imageUrl: "", category: "bolos", 
+    imageUrl: "", category: "", 
     isAvailable: true, availableStandard: true, availablePostpaid: true,
     stock: null, complementGroupIds: []
   });
@@ -43,9 +46,16 @@ export default function EditProductPage({ params }: EditPageProps) {
   useEffect(() => {
     const init = async () => {
       try {
-        const [groups, prods] = await Promise.all([getAllGroups(), getProducts()]);
+        // Busca Grupos, Produtos (para vínculo) e Categorias em paralelo
+        const [groups, prods, catsSnap] = await Promise.all([
+            getAllGroups(), 
+            getProducts(),
+            getDocs(query(collection(db, "categories"), orderBy("order")))
+        ]);
+        
         setAllMasterGroups(groups);
         setAllProducts(prods);
+        setCategories(catsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Category)));
 
         if (id) {
           const p = await getProductById(id);
@@ -57,7 +67,9 @@ export default function EditProductPage({ params }: EditPageProps) {
                 complementGroupIds: p.complementGroupIds || [],
                 availableStandard: p.availableStandard !== false, 
                 availablePostpaid: p.availablePostpaid !== false,
-                pricePostpaid: p.pricePostpaid || 0
+                pricePostpaid: p.pricePostpaid || 0,
+                // Garante que a categoria venha preenchida, ou vazio se não tiver
+                category: p.category || ""
             });
             setManageStock(p.stock !== null);
           }
@@ -91,7 +103,15 @@ export default function EditProductPage({ params }: EditPageProps) {
     e.preventDefault();
     setLoading(true);
     try {
-      const payload = { ...formData, stock: manageStock ? (formData.stock ?? 0) : null };
+      // Se nenhuma categoria foi selecionada e existem categorias, usa a primeira como fallback, ou mantém a atual
+      const finalCategory = formData.category || (categories.length > 0 ? categories[0].id : "geral");
+      
+      const payload = { 
+          ...formData, 
+          category: finalCategory,
+          stock: manageStock ? (formData.stock ?? 0) : null 
+      };
+      
       await updateProduct(id, payload);
       alert("Produto atualizado!");
       window.location.href = "/admin"; 
@@ -154,7 +174,7 @@ export default function EditProductPage({ params }: EditPageProps) {
      setEditingGroup(prev => ({ ...prev, options: opts }));
   };
 
-  if (fetching) return <div className="p-10 text-center">Carregando...</div>;
+  if (fetching) return <div className="p-10 text-center"><Loader2 className="animate-spin inline-block mr-2"/> Carregando dados...</div>;
 
   return (
     <div className="max-w-5xl mx-auto pb-20 pt-6 px-4">
@@ -182,7 +202,23 @@ export default function EditProductPage({ params }: EditPageProps) {
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
-                    <select className="w-full p-3 border rounded bg-white" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}><option value="bolos">Bolos</option><option value="doces">Doces</option><option value="salgados">Salgados</option><option value="bebidas">Bebidas</option></select>
+                    {/* SELECT DE CATEGORIAS DINÂMICO */}
+                    <div>
+                        <label className="text-xs font-bold uppercase text-gray-500 mb-1 block">Categoria</label>
+                        <select 
+                            className="w-full p-3 border rounded bg-white" 
+                            value={formData.category} 
+                            onChange={e => setFormData({...formData, category: e.target.value})}
+                        >
+                            {categories.length === 0 ? (
+                                <option value="">Carregando...</option>
+                            ) : (
+                                categories.map(cat => (
+                                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                ))
+                            )}
+                        </select>
+                    </div>
                 </div>
                 <textarea rows={3} className="w-full p-3 border rounded" placeholder="Descrição" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
                 
