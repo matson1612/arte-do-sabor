@@ -11,7 +11,9 @@ import {
   Settings, 
   LogOut,
   Store,
-  X
+  X,
+  DollarSign, // Novo Ícone
+  List // Novo Ícone
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 
@@ -28,7 +30,9 @@ export default function AdminSidebar({ isOpen, onClose }: SidebarProps) {
     { name: "Dashboard", href: "/admin/dashboard", icon: LayoutDashboard },
     { name: "Pedidos", href: "/admin/orders", icon: ShoppingBag },
     { name: "Cardápio", href: "/admin", icon: UtensilsCrossed },
+    { name: "Categorias", href: "/admin/categories", icon: List }, // <--- NOVO
     { name: "Clientes", href: "/admin/customers", icon: Users },
+    { name: "Fluxo de Caixa", href: "/admin/finance", icon: DollarSign }, // <--- NOVO
     { name: "Loja & Frete", href: "/admin/settings", icon: Settings },
   ];
 

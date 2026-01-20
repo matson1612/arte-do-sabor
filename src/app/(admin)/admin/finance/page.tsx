@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import { Expense, Order, ExpenseCategory } from "@/types";
 
-// Categorias para o Select
 const CATEGORIES: { id: ExpenseCategory; label: string; color: string }[] = [
     { id: 'insumos', label: 'Insumos / Mercado', color: 'bg-orange-100 text-orange-700' },
     { id: 'embalagens', label: 'Embalagens', color: 'bg-yellow-100 text-yellow-700' },
@@ -39,7 +38,6 @@ export default function FinancePage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      // Data de Início e Fim do Mês Selecionado
       const [year, month] = monthFilter.split('-').map(Number);
       const startDate = new Date(year, month - 1, 1);
       const endDate = new Date(year, month, 0, 23, 59, 59);
@@ -54,11 +52,9 @@ export default function FinancePage() {
       
       const incomes = ordersSnap.docs
         .map(d => ({ id: d.id, ...d.data() } as Order))
-        .filter(o => o.status !== 'cancelado') // Ignora cancelados
+        .filter(o => o.status !== 'cancelado') 
         .map(o => {
-            // Lógica de Recebimento:
-            // Se for Conta Aberta: Só conta se isPaid == true
-            // Se for Pix/Dinheiro/Cartão: Conta se status != cancelado (Assume recebido no ato)
+            // Lógica de Recebimento Real
             const isRecebido = o.paymentMethod !== 'conta_aberta' || o.isPaid;
             
             return {
@@ -73,24 +69,21 @@ export default function FinancePage() {
         });
 
       // 2. Buscar Despesas
-      // Nota: Firestore não filtra range de data em string date field facilmente sem index, 
-      // mas vamos filtrar no front para simplificar ou usar Timestamp se salvarmos assim.
-      // Aqui vou buscar tudo e filtrar no JS para simplificar a demo (em produção use Query Constraints)
       const expensesSnap = await getDocs(query(collection(db, "expenses"), orderBy("date", "desc")));
       const expenses = expensesSnap.docs
         .map(d => ({ id: d.id, ...d.data() } as Expense))
-        .filter(e => e.date.startsWith(monthFilter)) // Filtro simples de string YYYY-MM
+        .filter(e => e.date.startsWith(monthFilter))
         .map(e => ({
             id: e.id,
             type: 'expense',
             description: e.description,
             amount: Number(e.amount),
-            date: new Date(e.date + 'T12:00:00'), // Ajuste fuso
+            date: new Date(e.date + 'T12:00:00'),
             category: e.category,
             status: 'pago'
         }));
 
-      // 3. Unificar e Calcular
+      // 3. Unificar
       const all = [...incomes, ...expenses].sort((a, b) => b.date.getTime() - a.date.getTime());
       
       const totalIncome = incomes.filter(i => i.status === 'recebido').reduce((acc, curr) => acc + curr.amount, 0);
@@ -116,7 +109,7 @@ export default function FinancePage() {
           });
           setIsModalOpen(false);
           setNewExpense({ description: "", amount: "", category: "insumos", date: new Date().toISOString().slice(0, 10) });
-          loadData(); // Recarrega
+          loadData(); 
       } catch (e) { alert("Erro ao salvar"); }
       finally { setSaving(false); }
   };
@@ -130,7 +123,7 @@ export default function FinancePage() {
   };
 
   return (
-    <div className="pb-20 p-6 max-w-5xl mx-auto">
+    <div className="pb-20 p-4 md:p-6 max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
             <h1 className="text-2xl font-bold text-slate-800">Fluxo de Caixa</h1>
             
@@ -172,7 +165,7 @@ export default function FinancePage() {
             </div>
         </div>
 
-        {/* LISTA DE TRANSAÇÕES */}
+        {/* LISTA */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                 <h3 className="font-bold text-gray-700 flex items-center gap-2"><Filter size={16}/> Movimentações</h3>
@@ -182,56 +175,58 @@ export default function FinancePage() {
             </div>
 
             {loading ? <div className="p-10 flex justify-center"><Loader2 className="animate-spin text-gray-400"/></div> : (
-                <table className="w-full text-left">
-                    <thead className="bg-gray-50 text-gray-400 text-xs uppercase font-bold border-b">
-                        <tr>
-                            <th className="p-4">Data</th>
-                            <th className="p-4">Descrição</th>
-                            <th className="p-4">Categoria</th>
-                            <th className="p-4 text-right">Valor</th>
-                            <th className="p-4 w-10"></th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 text-sm">
-                        {transactions.map((t) => {
-                            const isIncome = t.type === 'income';
-                            const catStyle = CATEGORIES.find(c => c.id === t.category) || { label: t.category, color: 'bg-gray-100 text-gray-600' };
-                            
-                            return (
-                                <tr key={t.id} className="hover:bg-gray-50 transition-colors">
-                                    <td className="p-4 text-gray-500 font-medium whitespace-nowrap">{t.date.toLocaleDateString('pt-BR')}</td>
-                                    <td className="p-4 font-bold text-gray-700">
-                                        <div className="flex items-center gap-2">
-                                            {isIncome ? <div className="bg-emerald-100 p-1 rounded text-emerald-600"><ArrowDownLeft size={14}/></div> : <div className="bg-red-100 p-1 rounded text-red-600"><ArrowUpRight size={14}/></div>}
-                                            {t.description}
-                                            {t.status === 'pendente' && <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded border border-yellow-200">A Receber</span>}
-                                        </div>
-                                    </td>
-                                    <td className="p-4">
-                                        {isIncome ? (
-                                            <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md text-xs font-bold border border-emerald-100">Venda</span>
-                                        ) : (
-                                            <span className={`${catStyle.color} px-2 py-1 rounded-md text-xs font-bold border border-white shadow-sm`}>{catStyle.label}</span>
-                                        )}
-                                    </td>
-                                    <td className={`p-4 text-right font-bold ${isIncome ? 'text-emerald-600' : 'text-red-600'}`}>
-                                        {isIncome ? '+' : '-'} R$ {t.amount.toFixed(2)}
-                                    </td>
-                                    <td className="p-4 text-center">
-                                        {!isIncome && ( // Só permite apagar despesas manuais
-                                            <button onClick={() => handleDeleteExpense(t.id)} className="text-gray-300 hover:text-red-500 transition"><Trash2 size={16}/></button>
-                                        )}
-                                    </td>
-                                </tr>
-                            )
-                        })}
-                        {transactions.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-gray-400">Nenhuma movimentação neste mês.</td></tr>}
-                    </tbody>
-                </table>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left min-w-[600px]">
+                        <thead className="bg-gray-50 text-gray-400 text-xs uppercase font-bold border-b">
+                            <tr>
+                                <th className="p-4">Data</th>
+                                <th className="p-4">Descrição</th>
+                                <th className="p-4">Categoria</th>
+                                <th className="p-4 text-right">Valor</th>
+                                <th className="p-4 w-10"></th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 text-sm">
+                            {transactions.map((t) => {
+                                const isIncome = t.type === 'income';
+                                const catStyle = CATEGORIES.find(c => c.id === t.category) || { label: t.category, color: 'bg-gray-100 text-gray-600' };
+                                
+                                return (
+                                    <tr key={t.id} className="hover:bg-gray-50 transition-colors">
+                                        <td className="p-4 text-gray-500 font-medium whitespace-nowrap">{t.date.toLocaleDateString('pt-BR')}</td>
+                                        <td className="p-4 font-bold text-gray-700">
+                                            <div className="flex items-center gap-2">
+                                                {isIncome ? <div className="bg-emerald-100 p-1 rounded text-emerald-600"><ArrowDownLeft size={14}/></div> : <div className="bg-red-100 p-1 rounded text-red-600"><ArrowUpRight size={14}/></div>}
+                                                {t.description}
+                                                {t.status === 'pendente' && <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded border border-yellow-200">A Receber</span>}
+                                            </div>
+                                        </td>
+                                        <td className="p-4">
+                                            {isIncome ? (
+                                                <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-md text-xs font-bold border border-emerald-100">Venda</span>
+                                            ) : (
+                                                <span className={`${catStyle.color} px-2 py-1 rounded-md text-xs font-bold border border-white shadow-sm`}>{catStyle.label}</span>
+                                            )}
+                                        </td>
+                                        <td className={`p-4 text-right font-bold ${isIncome ? 'text-emerald-600' : 'text-red-600'}`}>
+                                            {isIncome ? '+' : '-'} R$ {t.amount.toFixed(2)}
+                                        </td>
+                                        <td className="p-4 text-center">
+                                            {!isIncome && ( 
+                                                <button onClick={() => handleDeleteExpense(t.id)} className="text-gray-300 hover:text-red-500 transition"><Trash2 size={16}/></button>
+                                            )}
+                                        </td>
+                                    </tr>
+                                )
+                            })}
+                            {transactions.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-gray-400">Nenhuma movimentação neste mês.</td></tr>}
+                        </tbody>
+                    </table>
+                </div>
             )}
         </div>
 
-        {/* MODAL NOVA DESPESA */}
+        {/* MODAL */}
         {isModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in">
                 <div className="bg-white w-full max-w-md rounded-2xl shadow-xl flex flex-col">
@@ -239,13 +234,11 @@ export default function FinancePage() {
                         <h2 className="font-bold text-gray-800">Nova Despesa</h2>
                         <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600"><Plus className="rotate-45" size={24}/></button>
                     </div>
-                    
                     <div className="p-6 space-y-4">
                         <div>
                             <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Descrição</label>
                             <input autoFocus className="w-full p-3 border rounded-xl outline-none focus:ring-2 focus:ring-red-100" placeholder="Ex: Conta de Luz" value={newExpense.description} onChange={e => setNewExpense({...newExpense, description: e.target.value})} />
                         </div>
-                        
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Valor (R$)</label>
@@ -256,23 +249,17 @@ export default function FinancePage() {
                                 <input type="date" className="w-full p-3 border rounded-xl outline-none bg-white" value={newExpense.date} onChange={e => setNewExpense({...newExpense, date: e.target.value})} />
                             </div>
                         </div>
-
                         <div>
                             <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Categoria</label>
                             <div className="grid grid-cols-2 gap-2">
                                 {CATEGORIES.map(cat => (
-                                    <button 
-                                        key={cat.id} 
-                                        onClick={() => setNewExpense({...newExpense, category: cat.id})}
-                                        className={`p-2 rounded-lg text-xs font-bold border transition-all ${newExpense.category === cat.id ? 'bg-slate-800 text-white border-slate-800 shadow-md transform scale-105' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
-                                    >
+                                    <button key={cat.id} onClick={() => setNewExpense({...newExpense, category: cat.id})} className={`p-2 rounded-lg text-xs font-bold border transition-all ${newExpense.category === cat.id ? 'bg-slate-800 text-white border-slate-800 shadow-md transform scale-105' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
                                         {cat.label}
                                     </button>
                                 ))}
                             </div>
                         </div>
                     </div>
-
                     <div className="p-4 border-t bg-gray-50 rounded-b-2xl">
                         <button onClick={handleSaveExpense} disabled={saving} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 flex justify-center items-center gap-2 transition shadow-lg">
                             {saving ? <Loader2 className="animate-spin"/> : "Confirmar Lançamento"}

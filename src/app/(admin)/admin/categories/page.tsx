@@ -41,7 +41,6 @@ export default function CategoriesPage() {
           if (isEditing) {
               await updateDoc(doc(db, "categories", isEditing.id), payload);
           } else {
-              // Cria ID "slugificado" (ex: "bolos_de_pote")
               const newId = formData.name.toLowerCase().trim().replace(/\s+/g, '_');
               await setDoc(doc(db, "categories", newId), payload);
           }
@@ -71,22 +70,19 @@ export default function CategoriesPage() {
   return (
     <div className="max-w-4xl mx-auto pb-20 p-6">
       <div className="flex items-center gap-4 mb-8">
-          <button onClick={() => router.back()} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft/></button>
           <h1 className="text-2xl font-bold text-slate-800">Gerenciar Categorias</h1>
       </div>
 
       <div className="grid gap-8 md:grid-cols-2">
-          {/* Formulário */}
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm h-fit">
               <h2 className="font-bold text-lg mb-4">{isEditing ? "Editar Categoria" : "Nova Categoria"}</h2>
               <div className="space-y-4">
                   <div>
                       <label className="text-xs font-bold text-gray-500 uppercase">Nome da Categoria</label>
                       <input className="w-full p-3 border rounded-lg" placeholder="Ex: Bolos de Pote" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} disabled={!!isEditing} />
-                      {isEditing && <p className="text-[10px] text-gray-400 mt-1">O ID não pode ser alterado, apenas o nome de exibição e ordem.</p>}
                   </div>
                   <div>
-                      <label className="text-xs font-bold text-gray-500 uppercase">Ordem de Exibição (1, 2, 3...)</label>
+                      <label className="text-xs font-bold text-gray-500 uppercase">Ordem de Exibição</label>
                       <input type="number" className="w-full p-3 border rounded-lg" placeholder="1" value={formData.order} onChange={e => setFormData({...formData, order: parseInt(e.target.value)})} />
                   </div>
                   <div className="flex gap-2 pt-2">
@@ -98,7 +94,6 @@ export default function CategoriesPage() {
               </div>
           </div>
 
-          {/* Lista */}
           <div className="space-y-2">
               {loading ? <Loader2 className="animate-spin mx-auto text-pink-600"/> : categories.map(cat => (
                   <div key={cat.id} className="bg-white p-4 rounded-xl border border-gray-200 flex justify-between items-center group">
