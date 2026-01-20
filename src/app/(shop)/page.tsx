@@ -53,15 +53,7 @@ export default function ShopHome() {
             const hydratedOptions = groupData.options?.map(opt => {
                 if (opt.linkedProductId && productMap.has(opt.linkedProductId)) {
                     const linkedProd = productMap.get(opt.linkedProductId)!;
-                    return {
-                        ...opt,
-                        name: linkedProd.name,
-                        stock: linkedProd.stock,
-                        isAvailable: linkedProd.isAvailable,
-                        priceAdd: linkedProd.basePrice,
-                        priceAddPostpaid: linkedProd.pricePostpaid,
-                        priceAddReseller: linkedProd.priceReseller
-                    };
+                    return { ...opt, name: linkedProd.name, stock: linkedProd.stock, isAvailable: linkedProd.isAvailable, priceAdd: linkedProd.basePrice, priceAddPostpaid: linkedProd.pricePostpaid, priceAddReseller: linkedProd.priceReseller };
                 }
                 return opt;
             });
@@ -77,7 +69,6 @@ export default function ShopHome() {
 
         setProducts(items);
         setCategories(catsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Category)));
-
       } catch (error) { console.error(error); } finally { setLoading(false); }
     };
     fetchData();
@@ -97,24 +88,13 @@ export default function ShopHome() {
 
   visibleProducts.forEach(p => {
       const catId = p.category || 'uncategorized';
-      if (groupedProducts[catId]) {
-          groupedProducts[catId].push(p);
-      } else {
-          groupedProducts['uncategorized'].push(p);
-      }
+      if (groupedProducts[catId]) groupedProducts[catId].push(p); else groupedProducts['uncategorized'].push(p);
   });
 
-  const catsToRender = [
-      ...categories, 
-      { id: 'uncategorized', name: 'Geral', order: 999 }
-  ].filter(c => groupedProducts[c.id] && groupedProducts[c.id].length > 0);
+  const catsToRender = [...categories, { id: 'uncategorized', name: 'Geral', order: 999 }].filter(c => groupedProducts[c.id] && groupedProducts[c.id].length > 0);
 
-  // --- LÓGICA DO MODAL ---
   const openModal = (product: Product) => {
-    setSelectedProduct(product);
-    setQuantity(1);
-    setObservation("");
-    setSelectedOptions({});
+    setSelectedProduct(product); setQuantity(1); setObservation(""); setSelectedOptions({});
   };
 
   const toggleOption = (group: ComplementGroup, option: Option) => {
@@ -141,17 +121,13 @@ export default function ShopHome() {
 
   const handleAddToCart = () => {
     if (!selectedProduct) return;
-    
     if (selectedProduct.stock !== null && selectedProduct.stock <= 0) return alert("Produto esgotado.");
-
     const missingRequired = selectedProduct.fullGroups?.find(g => g.required && (!selectedOptions[g.id] || selectedOptions[g.id].length === 0));
     if (missingRequired) return alert(`Grupo "${missingRequired.title}" é obrigatório.`);
-
     let customName = selectedProduct.name;
     const allSelectedOpts = Object.values(selectedOptions).flat();
     if (allSelectedOpts.length > 0) { const optNames = allSelectedOpts.map(o => o.name).join(', '); customName += ` (+ ${optNames})`; }
     if (observation.trim()) customName += ` [Obs: ${observation}]`;
-
     addToCart({ ...selectedProduct, name: customName, price: calculateTotal() / quantity, selectedOptions: selectedOptions }, quantity);
     setSelectedProduct(null);
   };
@@ -175,16 +151,33 @@ export default function ShopHome() {
             return (
               <section key={category.id}>
                 <div className="flex items-center gap-4 mb-6"><h3 className="text-2xl font-bold text-stone-800 capitalize tracking-tight">{category.name}</h3><div className="h-[1px] flex-1 bg-stone-200"></div></div>
-                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                
+                {/* GRID RESPONSIVO: Cards mais flexíveis no mobile */}
+                <div className="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
                   {items.map((product) => {
                     const isOutOfStock = product.stock !== null && product.stock <= 0;
                     return (
-                      <div key={product.id} onClick={() => openModal(product)} className={`group bg-white rounded-3xl p-3 shadow-[0_2px_15px_-3px_rgba(0,0,0,0.07),0_10px_20px_-2px_rgba(0,0,0,0.04)] hover:shadow-xl hover:-translate-y-1 transition-all duration-300 border border-stone-50 relative overflow-hidden flex gap-4 cursor-pointer ${isOutOfStock ? 'opacity-60 grayscale' : ''}`}>
+                      <div key={product.id} onClick={() => openModal(product)} className={`group bg-white rounded-3xl p-3 shadow-sm hover:shadow-xl border border-stone-50 relative overflow-hidden flex gap-3 md:gap-4 cursor-pointer transition-all ${isOutOfStock ? 'opacity-60 grayscale' : ''}`}>
                         {isOutOfStock && <div className="absolute inset-0 z-20 bg-stone-100/50 backdrop-blur-[1px] flex items-center justify-center"><span className="bg-stone-800 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest">Esgotado</span></div>}
-                        <div className="w-28 h-28 rounded-2xl overflow-hidden flex-shrink-0 bg-stone-100 relative shadow-inner">{product.imageUrl ? <img src={product.imageUrl} className="w-full h-full object-cover group-hover:scale-110 transition duration-500" /> : <ImageOff className="m-auto mt-10 text-stone-300" size={24} />}</div>
-                        <div className="flex-1 flex flex-col justify-between py-1">
-                            <div><h4 className="font-bold text-stone-800 text-lg leading-tight line-clamp-2 mb-1">{product.name}</h4><p className="text-xs text-stone-500 line-clamp-2 leading-relaxed">{product.description}</p></div>
-                            <div className="flex justify-between items-end mt-2"><div className="flex flex-col"><span className="text-[10px] text-stone-400 font-bold uppercase">A partir de</span><span className="font-bold text-lg text-emerald-600">{getPrice(product).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></div>{!isOutOfStock && <button className="bg-stone-900 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:bg-pink-600 transition-colors"><Plus size={16} /></button>}</div>
+                        
+                        {/* Imagem Adaptável: w-24 no mobile para sobrar espaço */}
+                        <div className="w-24 h-24 md:w-28 md:h-28 rounded-2xl overflow-hidden flex-shrink-0 bg-stone-100 relative shadow-inner">
+                            {product.imageUrl ? <img src={product.imageUrl} className="w-full h-full object-cover group-hover:scale-110 transition duration-500" /> : <ImageOff className="m-auto mt-8 md:mt-10 text-stone-300" size={24} />}
+                        </div>
+                        
+                        {/* Conteúdo com min-w-0 para evitar estouro de texto */}
+                        <div className="flex-1 flex flex-col justify-between py-1 min-w-0">
+                            <div>
+                                <h4 className="font-bold text-stone-800 text-base md:text-lg leading-tight line-clamp-2 mb-1">{product.name}</h4>
+                                <p className="text-xs text-stone-500 line-clamp-2 leading-relaxed">{product.description}</p>
+                            </div>
+                            <div className="flex justify-between items-end mt-2 gap-2">
+                                <div className="flex flex-col min-w-0">
+                                    <span className="text-[10px] text-stone-400 font-bold uppercase truncate">A partir de</span>
+                                    <span className="font-bold text-base md:text-lg text-emerald-600">{getPrice(product).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                </div>
+                                {!isOutOfStock && <button className="bg-stone-900 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:bg-pink-600 transition-colors flex-shrink-0"><Plus size={16} /></button>}
+                            </div>
                         </div>
                       </div>
                     );
@@ -195,86 +188,43 @@ export default function ShopHome() {
         })
       )}
       
-      {/* --- MODAL COM TAMANHO FIXO E POSIÇÃO CORRETA --- */}
+      {/* --- MODAL RESPONSIVO (Fix para Mobile) --- */}
       {selectedProduct && (
-        // z-[100]: Garante que fique acima de TUDO (incluindo menu).
-        // pt-24 pb-4: Cria a área segura abaixo do menu (80px + folga) e acima do fim da tela.
-        // items-center: Centraliza o container na área útil.
+        // z-[100] garante prioridade sobre menus. pt-24 e pb-4 criam margem segura.
         <div className="fixed inset-0 z-[100] flex justify-center items-center bg-stone-900/60 p-4 pt-24 pb-4 animate-in fade-in duration-300 backdrop-blur-sm">
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
-            
-            {/* h-full: Ocupa toda a altura disponível definida pelo padding do pai.
-                Isto cria o efeito "tamanho fixo" que respeita os limites. */}
-            <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-8 duration-300 flex flex-col h-full">
+            <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-8 duration-300 flex flex-col h-full max-h-[calc(100vh-100px)]">
                 
-                {/* Imagem */}
+                {/* Imagem do Modal (h-48 no mobile, h-56 no PC) */}
                 <div className="h-48 md:h-56 bg-stone-100 relative flex-shrink-0">
                     <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-white/80 backdrop-blur text-stone-800 p-2 rounded-full hover:bg-white shadow-sm transition"><X size={20}/></button>
                     {selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-stone-300"><ImageOff size={40}/></div>}
-                    
-                    {/* Alerta de Esgotado */}
-                    {selectedProduct.stock !== null && selectedProduct.stock <= 0 && (
-                        <div className="absolute inset-0 bg-stone-900/50 backdrop-blur-[2px] flex items-center justify-center z-10">
-                            <span className="bg-red-500 text-white px-4 py-2 rounded-full font-bold uppercase shadow-lg flex items-center gap-2">
-                                <AlertCircle size={20}/> Produto Esgotado
-                            </span>
-                        </div>
-                    )}
+                    {selectedProduct.stock !== null && selectedProduct.stock <= 0 && <div className="absolute inset-0 bg-stone-900/50 backdrop-blur-[2px] flex items-center justify-center z-10"><span className="bg-red-500 text-white px-4 py-2 rounded-full font-bold uppercase shadow-lg flex items-center gap-2"><AlertCircle size={20}/> Produto Esgotado</span></div>}
                     <div className="absolute bottom-0 inset-x-0 h-20 bg-gradient-to-t from-white to-transparent"></div>
                 </div>
 
-                {/* Conteúdo com Scroll */}
                 <div className="p-6 pt-0 space-y-6 flex-1 overflow-y-auto">
-                    <div>
-                        <h2 className="text-2xl font-bold text-stone-800 mb-1">{selectedProduct.name}</h2>
-                        <p className="text-stone-500 text-sm leading-relaxed">{selectedProduct.description}</p>
-                    </div>
-
+                    <div><h2 className="text-2xl font-bold text-stone-800 mb-1">{selectedProduct.name}</h2><p className="text-stone-500 text-sm leading-relaxed">{selectedProduct.description}</p></div>
                     {selectedProduct.fullGroups?.map(group => (
                         <div key={group.id} className="space-y-3">
                             <div className="flex justify-between items-center border-b border-stone-100 pb-2"><h3 className="font-bold text-stone-700 text-sm">{group.title}</h3><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${group.required ? 'bg-rose-100 text-rose-700' : 'bg-stone-100 text-stone-500'}`}>{group.required ? 'OBRIGATÓRIO' : 'OPCIONAL'}</span></div>
                             <div className="space-y-2">{group.options.map(opt => { 
                                 const isSelected = selectedOptions[group.id]?.some(o => o.id === opt.id); 
                                 const optOutOfStock = opt.stock !== null && opt.stock <= 0; 
-                                return (
-                                    <div key={opt.id} onClick={() => !optOutOfStock && toggleOption(group, opt)} className={`flex justify-between items-center p-3 rounded-xl border transition-all cursor-pointer ${optOutOfStock ? 'opacity-50 bg-stone-50 cursor-not-allowed' : isSelected ? 'border-pink-500 bg-pink-50/30 ring-1 ring-pink-500' : 'border-stone-100 hover:border-pink-200 bg-white'}`}>
-                                        <div className="flex items-center gap-3">
-                                            <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${isSelected ? 'bg-pink-500 border-pink-500 text-white' : 'border-stone-300'}`}>{isSelected && <CheckSquare size={14}/>}</div>
-                                            <span className="text-sm font-medium text-stone-700">{opt.name} {optOutOfStock && '(Esgotado)'}</span>
-                                        </div>
-                                        {!optOutOfStock && getOptionPrice(opt) > 0 && <span className="text-xs font-bold text-emerald-600">+ R$ {getOptionPrice(opt).toFixed(2)}</span>}
-                                    </div>
-                                ) 
-                            })}</div>
+                                return (<div key={opt.id} onClick={() => !optOutOfStock && toggleOption(group, opt)} className={`flex justify-between items-center p-3 rounded-xl border transition-all cursor-pointer ${optOutOfStock ? 'opacity-50 bg-stone-50 cursor-not-allowed' : isSelected ? 'border-pink-500 bg-pink-50/30 ring-1 ring-pink-500' : 'border-stone-100 hover:border-pink-200 bg-white'}`}><div className="flex items-center gap-3"><div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${isSelected ? 'bg-pink-500 border-pink-500 text-white' : 'border-stone-300'}`}>{isSelected && <CheckSquare size={14}/>}</div><span className="text-sm font-medium text-stone-700">{opt.name} {optOutOfStock && '(Esgotado)'}</span></div>{!optOutOfStock && getOptionPrice(opt) > 0 && <span className="text-xs font-bold text-emerald-600">+ R$ {getOptionPrice(opt).toFixed(2)}</span>}</div>) })}</div>
                         </div>
                     ))}
                     <div><label className="font-bold text-stone-700 text-sm mb-2 flex items-center gap-2"><MessageSquare size={16}/> Alguma observação?</label><textarea className="w-full p-3 border border-stone-200 rounded-xl bg-stone-50 focus:bg-white focus:ring-2 focus:ring-pink-100 text-sm outline-none transition" rows={2} placeholder="Ex: Tirar cebola, caprichar no molho..." value={observation} onChange={e => setObservation(e.target.value)}/></div>
                 </div>
-
-                {/* Footer Fixo */}
+                
+                {/* Footer do Modal */}
                 <div className="p-4 bg-white border-t border-stone-100 flex items-center gap-4 flex-shrink-0">
                     {(() => {
                         const isOutOfStock = selectedProduct.stock !== null && selectedProduct.stock <= 0;
                         return (
                             <>
-                                <div className={`flex items-center bg-stone-100 rounded-xl h-12 px-1 ${isOutOfStock ? 'opacity-50 pointer-events-none' : ''}`}>
-                                    <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="w-10 h-full flex items-center justify-center hover:text-pink-600 transition"><Minus size={18}/></button>
-                                    <span className="w-8 text-center font-bold text-lg text-stone-800">{quantity}</span>
-                                    <button onClick={() => setQuantity(q => q + 1)} className="w-10 h-full flex items-center justify-center hover:text-pink-600 transition"><Plus size={18}/></button>
-                                </div>
-                                
-                                <button 
-                                    onClick={handleAddToCart} 
-                                    disabled={isOutOfStock}
-                                    className={`flex-1 font-bold h-12 rounded-xl flex justify-between items-center px-6 shadow-lg transition-all active:scale-95 ${
-                                        isOutOfStock 
-                                        ? 'bg-stone-300 text-stone-500 cursor-not-allowed shadow-none' 
-                                        : 'bg-stone-900 text-white hover:bg-stone-800 shadow-stone-200'
-                                    }`}
-                                >
-                                    <span>{isOutOfStock ? 'Produto Esgotado' : 'Adicionar'}</span>
-                                    {!isOutOfStock && <span className="opacity-90">{calculateTotal().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>}
-                                </button>
+                                <div className={`flex items-center bg-stone-100 rounded-xl h-12 px-1 ${isOutOfStock ? 'opacity-50 pointer-events-none' : ''}`}><button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="w-10 h-full flex items-center justify-center hover:text-pink-600 transition"><Minus size={18}/></button><span className="w-8 text-center font-bold text-lg text-stone-800">{quantity}</span><button onClick={() => setQuantity(q => q + 1)} className="w-10 h-full flex items-center justify-center hover:text-pink-600 transition"><Plus size={18}/></button></div>
+                                <button onClick={handleAddToCart} disabled={isOutOfStock} className={`flex-1 font-bold h-12 rounded-xl flex justify-between items-center px-6 shadow-lg transition-all active:scale-95 ${isOutOfStock ? 'bg-stone-300 text-stone-500 cursor-not-allowed shadow-none' : 'bg-stone-900 text-white hover:bg-stone-800 shadow-stone-200'}`}><span>{isOutOfStock ? 'Produto Esgotado' : 'Adicionar'}</span>{!isOutOfStock && <span className="opacity-90">{calculateTotal().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>}</button>
                             </>
                         );
                     })()}

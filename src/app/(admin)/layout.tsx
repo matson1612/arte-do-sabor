@@ -8,25 +8,17 @@ import { useRouter } from "next/navigation";
 import { Loader2, Menu } from "lucide-react";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading, isAdmin } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
   const [isSidebarOpen, setSidebarOpen] = useState(false);
 
-  // Proteção de Rota
   useEffect(() => {
-    if (!loading) {
-      if (!user) {
-        router.push("/");
-      } 
-      // Se tiver lógica de isAdmin, descomente:
-      // else if (!isAdmin) { router.push("/"); }
+    if (!loading && !user) {
+      router.push("/");
     }
-  }, [user, loading, isAdmin, router]);
+  }, [user, loading, router]);
 
-  if (loading) {
-    return <div className="h-screen flex items-center justify-center bg-gray-100"><Loader2 className="animate-spin text-pink-600" size={40}/></div>;
-  }
-
+  if (loading) return <div className="h-screen flex items-center justify-center bg-gray-100"><Loader2 className="animate-spin text-pink-600" size={40}/></div>;
   if (!user) return null;
 
   return (
@@ -34,10 +26,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {/* Menu Lateral */}
       <AdminSidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      {/* Conteúdo */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* Conteúdo Principal */}
+      <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${isSidebarOpen ? 'lg:ml-64' : 'lg:ml-64'}`}>
+        {/* CORREÇÃO AQUI: lg:ml-64 garante margem só no PC. No mobile fica sem margem. */}
         
-        {/* Header Mobile (Barra superior só para celular) */}
+        {/* Header Mobile */}
         <header className="lg:hidden bg-white border-b p-4 flex items-center gap-4 sticky top-0 z-30 shadow-sm">
             <button 
                 onClick={() => setSidebarOpen(true)} 
@@ -48,7 +41,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <h1 className="font-bold text-lg text-slate-800">Painel Admin</h1>
         </header>
 
-        {/* Área Principal */}
+        {/* Área de Conteúdo */}
+        {/* Adicionei overflow-x-hidden para evitar rolagem horizontal indesejada da página inteira */}
         <main className="flex-1 p-4 md:p-8 overflow-x-hidden">
             {children}
         </main>
