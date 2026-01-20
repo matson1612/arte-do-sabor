@@ -59,7 +59,7 @@ class PixPayload {
   
   // Substitua pela sua CHAVE PIX real (CPF, Celular, Email ou Aleatória)
   // Se for celular, use formato +55...
-  export const MY_PIX_KEY = "+5563981221181"; 
+  export const MY_PIX_KEY = "liliasuzana.pinheiro@gmail.com"; 
   export const MY_NAME = "Arte do Sabor";
   export const MY_CITY = "Palmas";
   
