@@ -3,7 +3,7 @@
 
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
-import { Trash2, ArrowLeft, Send, MapPin, Search, Loader2, ShoppingBag, CreditCard, FileText, CheckCircle, Plus, Minus, AlertTriangle, Phone, QrCode, Copy, X, Link as LinkIcon, Banknote, Save } from "lucide-react";
+import { Trash2, ArrowLeft, Send, MapPin, Search, Loader2, ShoppingBag, CreditCard, FileText, CheckCircle, Plus, Minus, AlertTriangle, Phone, QrCode, Copy, X, Link as LinkIcon, Banknote, Save, Pencil } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
 import { db } from "@/lib/firebase";
@@ -18,14 +18,14 @@ import { generatePixCopyPaste } from "@/utils/pix";
 const GOOGLE_MAPS_API_KEY = "AIzaSyBy365txh8nJ9JuGfvyPGdW5-angEXWBj8"; 
 const DEFAULT_CENTER = { lat: -10.183760, lng: -48.333650 }; 
 
-// CORREÇÃO CRÍTICA: Define as bibliotecas fora do componente para carregar a geometria
+// CORREÇÃO CRÍTICA: Carrega a biblioteca de geometria para calcular distâncias
 const LIBRARIES: ("geometry")[] = ["geometry"];
 
 export default function CartPage() {
   const { items, removeFromCart, updateQuantity, clearCart, cartTotal } = useCart();
   const { user, loginGoogle, profile } = useAuth();
   
-  // CORREÇÃO: Carrega a biblioteca 'geometry' junto com o mapa
+  // Carrega o Google Maps com a biblioteca 'geometry'
   const { isLoaded } = useJsApiLoader({ 
     id: 'google-map-script', 
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
@@ -41,12 +41,14 @@ export default function CartPage() {
   const [deliveryMethod, setDeliveryMethod] = useState<'delivery' | 'pickup'>('delivery');
   const [paymentMethod, setPaymentMethod] = useState('pix');
   const [shippingPrice, setShippingPrice] = useState(0);
+  const [shippingDetails, setShippingDetails] = useState(""); // <--- NOVO: Guarda "5.2km" ou "Taquaralto"
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [stockWarnings, setStockWarnings] = useState<string[]>([]);
   const [missingPhone, setMissingPhone] = useState("");
 
-  // Modal Novo Endereço
+  // Modal Endereço (Editar/Criar)
   const [isAddrModalOpen, setIsAddrModalOpen] = useState(false);
+  const [editingAddrId, setEditingAddrId] = useState<string | null>(null);
   const [newAddr, setNewAddr] = useState<Partial<UserAddress>>({
       regionType: 'plano_diretor',
       street: "", number: "", district: "", complement: "", nickname: "Casa", cep: ""
@@ -104,9 +106,13 @@ export default function CartPage() {
     validate();
   }, []);
 
-  // 4. Cálculo de Frete (BLINDADO CONTRA ERRO SPHERICAL)
+  // 4. Cálculo de Frete + Detalhes
   useEffect(() => {
-    if (deliveryMethod === 'pickup') { setShippingPrice(0); return; }
+    if (deliveryMethod === 'pickup') { 
+        setShippingPrice(0); 
+        setShippingDetails(""); 
+        return; 
+    }
     
     // Só calcula se tiver settings, endereço e o mapa carregado COM geometria
     if (!storeSettings || !selectedAddressId || !isLoaded || !window.google?.maps?.geometry) return;
@@ -115,6 +121,7 @@ export default function CartPage() {
     if (!addr) return;
 
     let price = 0;
+    let details = "";
 
     try {
         // Lógica 1: Plano Diretor (Distância)
@@ -122,8 +129,9 @@ export default function CartPage() {
             const from = new window.google.maps.LatLng(storeSettings.location.lat, storeSettings.location.lng);
             const to = new window.google.maps.LatLng(addr.location.lat, addr.location.lng);
             
-            // Aqui é onde dava erro se a lib geometry não carregasse
+            // Calcula distância
             const distKm = window.google.maps.geometry.spherical.computeDistanceBetween(from, to) / 1000;
+            details = `${distKm.toFixed(1)} km`; // Ex: "5.2 km"
 
             const rule = storeSettings.shipping.distanceTable.find(r => distKm >= r.minKm && distKm <= r.maxKm);
             if (rule) price = rule.price;
@@ -137,6 +145,8 @@ export default function CartPage() {
         else if (addr.regionType === 'outras_localidades' && addr.sectorName) {
             const area = storeSettings.shipping.fixedAreas.find(a => a.name === addr.sectorName);
             if (area) {
+                details = area.name; // Ex: "Taquaralto"
+
                 if (area.type === 'fixed') {
                     price = area.price;
                 } else if (area.type === 'km_plus_tax' && addr.location && storeSettings.location) {
@@ -147,6 +157,7 @@ export default function CartPage() {
                     // R$ 2,00 por Km (base) + Taxa fixa do setor
                     const baseKmPrice = 2; 
                     price = (distKm * baseKmPrice) + (area.tax || 0);
+                    details += ` (${distKm.toFixed(1)} km)`;
                 }
             }
         }
@@ -156,27 +167,50 @@ export default function CartPage() {
 
     if(storeSettings.shipping.freeShippingAbove && storeSettings.shipping.freeShippingAbove > 0 && cartTotal >= storeSettings.shipping.freeShippingAbove) {
         price = 0;
+        details = "Frete Grátis";
     }
 
     setShippingPrice(price);
+    setShippingDetails(details);
   }, [deliveryMethod, selectedAddressId, storeSettings, savedAddresses, cartTotal, isLoaded]);
 
   // --- Funções Auxiliares ---
-  const handleOpenPix = () => {
-      const total = cartTotal + shippingPrice;
-      const code = generatePixCopyPaste(total, storeSettings?.pix);
-      setPixCode(code); setPixCopied(false); setShowPixModal(true);
+
+  const handleOpenEditAddress = (addr: UserAddress) => {
+      setEditingAddrId(addr.id);
+      setNewAddr({ ...addr });
+      if(addr.location) setAddrMapLoc(addr.location);
+      setIsAddrModalOpen(true);
   };
 
-  const handleCopyPix = () => { navigator.clipboard.writeText(pixCode); setPixCopied(true); setTimeout(() => setPixCopied(false), 2000); };
+  const handleNewAddress = () => {
+      setEditingAddrId(null);
+      setNewAddr({ regionType: 'plano_diretor', street: "", number: "", district: "", complement: "", nickname: "Casa", cep: "" });
+      setAddrMapLoc(DEFAULT_CENTER);
+      setIsAddrModalOpen(true);
+  };
 
   const handleSaveAddress = async () => {
       if(!newAddr.street || !newAddr.number) return alert("Preencha rua e número");
       if(!user) return;
-      const addressData: UserAddress = { id: crypto.randomUUID(), ...newAddr as UserAddress, location: addrMapLoc };
-      const updatedList = [...savedAddresses, addressData];
+
+      let updatedList = [...savedAddresses];
+      const addressData: UserAddress = {
+          id: editingAddrId || crypto.randomUUID(),
+          ...newAddr as UserAddress,
+          location: addrMapLoc
+      };
+
+      if (editingAddrId) {
+          updatedList = updatedList.map(a => a.id === editingAddrId ? addressData : a);
+      } else {
+          updatedList.push(addressData);
+          setSelectedAddressId(addressData.id);
+      }
+
       await updateDoc(doc(db, "users", user.uid), { savedAddresses: updatedList });
-      setSavedAddresses(updatedList); setSelectedAddressId(addressData.id); setIsAddrModalOpen(false);
+      setSavedAddresses(updatedList);
+      setIsAddrModalOpen(false);
   };
 
   const handleBuscaCep = async () => {
@@ -198,6 +232,13 @@ export default function CartPage() {
           }
       } catch(e) { alert("Erro CEP"); }
   };
+
+  const handleOpenPix = () => {
+      const total = cartTotal + shippingPrice;
+      const code = generatePixCopyPaste(total, storeSettings?.pix);
+      setPixCode(code); setPixCopied(false); setShowPixModal(true);
+  };
+  const handleCopyPix = () => { navigator.clipboard.writeText(pixCode); setPixCopied(true); setTimeout(() => setPixCopied(false), 2000); };
 
   const handleCheckout = async () => {
     if (!user) { loginGoogle(); return; }
@@ -334,14 +375,21 @@ export default function CartPage() {
                             <div className="space-y-2 mb-4">
                                 <p className="text-xs font-bold text-gray-500 uppercase">Selecione:</p>
                                 {savedAddresses.map(addr => (
-                                    <div key={addr.id} onClick={() => setSelectedAddressId(addr.id)} className={`p-3 border rounded-xl cursor-pointer flex justify-between items-center ${selectedAddressId === addr.id ? 'border-pink-500 bg-pink-50' : 'border-gray-200'}`}>
-                                        <div><span className="text-xs font-bold bg-white border px-2 py-0.5 rounded text-gray-500 uppercase">{addr.nickname}</span><p className="font-bold text-sm mt-1">{addr.street}, {addr.number}</p><p className="text-xs text-gray-500">{addr.district} ({addr.regionType === 'plano_diretor' ? 'Plano Diretor' : addr.sectorName})</p></div>
-                                        {selectedAddressId === addr.id && <CheckCircle size={18} className="text-pink-600"/>}
+                                    <div key={addr.id} className={`p-3 border rounded-xl cursor-pointer flex justify-between items-center ${selectedAddressId === addr.id ? 'border-pink-500 bg-pink-50' : 'border-gray-200'}`}>
+                                        <div onClick={() => setSelectedAddressId(addr.id)} className="flex-1">
+                                            <span className="text-xs font-bold bg-white border px-2 py-0.5 rounded text-gray-500 uppercase">{addr.nickname}</span>
+                                            <p className="font-bold text-sm mt-1">{addr.street}, {addr.number}</p>
+                                            <p className="text-xs text-gray-500">{addr.district} ({addr.regionType === 'plano_diretor' ? 'Plano Diretor' : addr.sectorName})</p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            {selectedAddressId === addr.id && <CheckCircle size={18} className="text-pink-600"/>}
+                                            <button onClick={() => handleOpenEditAddress(addr)} className="text-gray-400 hover:text-blue-500 p-1"><Pencil size={16}/></button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
                         ) : null}
-                        <button onClick={() => setIsAddrModalOpen(true)} className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 font-bold flex items-center justify-center gap-2 hover:bg-gray-50">+ Novo Endereço</button>
+                        <button onClick={handleNewAddress} className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 font-bold flex items-center justify-center gap-2 hover:bg-gray-50">+ Novo Endereço</button>
                     </div>
                 )}
             </div>
@@ -362,7 +410,15 @@ export default function CartPage() {
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 shadow-lg safe-area-bottom z-40">
             <div className="max-w-2xl mx-auto space-y-3">
                 <div className="flex justify-between font-bold text-lg text-gray-800"><span>Total</span><span className="text-green-600">R$ {(cartTotal + shippingPrice).toFixed(2)}</span></div>
-                <div className="flex justify-between text-xs text-gray-500"><span>Frete: {deliveryMethod === 'pickup' ? 'Grátis' : `R$ ${shippingPrice.toFixed(2)}`}</span></div>
+                
+                {/* --- AQUI ESTÁ A ALTERAÇÃO: EXIBINDO DETALHES AO LADO DO PREÇO --- */}
+                <div className="flex justify-between text-xs text-gray-500">
+                    <span className="flex items-center gap-1">
+                        Frete: {deliveryMethod === 'pickup' ? 'Grátis' : `R$ ${shippingPrice.toFixed(2)}`}
+                        {shippingDetails && <span className="font-normal text-gray-400">{shippingDetails}</span>}
+                    </span>
+                </div>
+
                 <button onClick={handleCheckout} disabled={isSubmitting} className="w-full bg-green-600 text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-700 shadow-lg">{isSubmitting ? <Loader2 className="animate-spin"/> : <><Send size={18}/> {paymentMethod === 'conta_aberta' ? 'Confirmar na Conta' : 'Enviar Pedido'}</>}</button>
             </div>
         </div>
@@ -371,11 +427,10 @@ export default function CartPage() {
         {isAddrModalOpen && (
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4">
                 <div className="bg-white w-full max-w-md rounded-2xl p-6 h-[85vh] sm:h-auto overflow-y-auto animate-in slide-in-from-bottom">
-                    <h2 className="font-bold text-lg mb-4">Novo Endereço</h2>
+                    <h2 className="font-bold text-lg mb-4">{editingAddrId ? 'Editar Endereço' : 'Novo Endereço'}</h2>
                     <div className="space-y-4">
                         <div><label className="text-xs font-bold text-gray-500 uppercase">Salvar como</label><input className="w-full p-2 border rounded" placeholder="Ex: Casa, Trabalho" value={newAddr.nickname} onChange={e => setNewAddr({...newAddr, nickname: e.target.value})} /></div>
 
-                        {/* SELETOR DE REGIÃO */}
                         <div className="flex bg-gray-100 p-1 rounded-lg">
                             <button onClick={() => setNewAddr({...newAddr, regionType: 'plano_diretor', sectorName: undefined})} className={`flex-1 py-2 text-xs font-bold rounded ${newAddr.regionType === 'plano_diretor' ? 'bg-white shadow text-slate-800' : 'text-gray-500'}`}>Plano Diretor</button>
                             <button onClick={() => setNewAddr({...newAddr, regionType: 'outras_localidades'})} className={`flex-1 py-2 text-xs font-bold rounded ${newAddr.regionType === 'outras_localidades' ? 'bg-white shadow text-slate-800' : 'text-gray-500'}`}>Outras Regiões</button>
@@ -399,7 +454,7 @@ export default function CartPage() {
                         <div className="flex gap-2"><input className="w-24 p-2 border rounded" placeholder="Nº" value={newAddr.number} onChange={e => setNewAddr({...newAddr, number: e.target.value})} /><input className="flex-1 p-2 border rounded" placeholder="Complemento" value={newAddr.complement} onChange={e => setNewAddr({...newAddr, complement: e.target.value})} /></div>
 
                         <div className="h-40 rounded-lg overflow-hidden border relative bg-gray-100">
-                            {isLoaded && <GoogleMap mapContainerStyle={{width:'100%',height:'100%'}} center={addrMapLoc} zoom={16}><Marker position={addrMapLoc} draggable onDragEnd={(e) => e.latLng && setAddrMapLoc({lat: e.latLng.lat(), lng: e.latLng.lng()})}/></GoogleMap>}
+                            {isLoaded && <GoogleMap mapContainerStyle={{width:'100%',height:'100%'}} center={addrMapLoc} zoom={16} onClick={(e) => e.latLng && setAddrMapLoc({lat: e.latLng.lat(), lng: e.latLng.lng()})}><Marker position={addrMapLoc} draggable onDragEnd={(e) => e.latLng && setAddrMapLoc({lat: e.latLng.lat(), lng: e.latLng.lng()})}/></GoogleMap>}
                             <div className="absolute bottom-1 left-0 w-full text-center"><span className="bg-white/80 text-[10px] px-2 rounded shadow">Confirme a localização no mapa</span></div>
                         </div>
 
@@ -409,7 +464,7 @@ export default function CartPage() {
             </div>
         )}
 
-      {/* Modal PIX (Igual) */}
+      {/* Modal PIX */}
       {showPixModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in">
               <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl p-6 relative animate-in zoom-in-95 duration-300">

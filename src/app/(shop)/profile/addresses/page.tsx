@@ -5,12 +5,11 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { ArrowLeft, Plus, MapPin, Trash2, Search, Loader2, Save, X } from "lucide-react";
+import { ArrowLeft, Plus, MapPin, Trash2, Search, Loader2, Save, X, Pencil } from "lucide-react";
 import Link from "next/link";
 import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
 import { UserAddress, StoreSettings } from "@/types";
 
-// ⚠️ Mantenha sua chave aqui
 const GOOGLE_MAPS_API_KEY = "AIzaSyBy365txh8nJ9JuGfvyPGdW5-angEXWBj8"; 
 const DEFAULT_CENTER = { lat: -10.183760, lng: -48.333650 };
 const LIBRARIES: ("geometry")[] = ["geometry"];
@@ -27,7 +26,10 @@ export default function AddressesPage() {
   const [addresses, setAddresses] = useState<UserAddress[]>([]);
   const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
 
+  // Estado do Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null); // ID sendo editado
+  
   const [newAddr, setNewAddr] = useState<Partial<UserAddress>>({
       regionType: 'plano_diretor',
       street: "", number: "", district: "", complement: "", nickname: "Minha Casa", cep: ""
@@ -35,6 +37,7 @@ export default function AddressesPage() {
   const [addrMapLoc, setAddrMapLoc] = useState(DEFAULT_CENTER);
   const [saving, setSaving] = useState(false);
 
+  // Carregar Dados
   useEffect(() => {
     const init = async () => {
       try {
@@ -52,6 +55,22 @@ export default function AddressesPage() {
     };
     init();
   }, [user]);
+
+  // Abrir Modal para Criar
+  const openNew = () => {
+      setEditingId(null);
+      setNewAddr({ regionType: 'plano_diretor', street: "", number: "", district: "", complement: "", nickname: "Casa", cep: "" });
+      setAddrMapLoc(DEFAULT_CENTER);
+      setIsModalOpen(true);
+  };
+
+  // Abrir Modal para Editar
+  const openEdit = (addr: UserAddress) => {
+      setEditingId(addr.id);
+      setNewAddr({ ...addr });
+      if (addr.location) setAddrMapLoc(addr.location);
+      setIsModalOpen(true);
+  };
 
   const handleBuscaCep = async () => {
       if(!newAddr.cep || newAddr.cep.length < 8) return alert("CEP Inválido");
@@ -79,19 +98,25 @@ export default function AddressesPage() {
       
       setSaving(true);
       try {
-          const addressData: UserAddress = {
-              id: crypto.randomUUID(),
-              ...newAddr as UserAddress,
-              location: addrMapLoc
-          };
+          let updatedList = [...addresses];
 
-          const updatedList = [...addresses, addressData];
+          if (editingId) {
+              // Atualizar Existente
+              updatedList = updatedList.map(a => a.id === editingId ? { ...a, ...newAddr as UserAddress, location: addrMapLoc } : a);
+          } else {
+              // Criar Novo
+              const addressData: UserAddress = {
+                  id: crypto.randomUUID(),
+                  ...newAddr as UserAddress,
+                  location: addrMapLoc
+              };
+              updatedList.push(addressData);
+          }
           
           if(user) {
               await updateDoc(doc(db, "users", user.uid), { savedAddresses: updatedList });
               setAddresses(updatedList);
               setIsModalOpen(false);
-              setNewAddr({ regionType: 'plano_diretor', street: "", number: "", district: "", complement: "", nickname: "", cep: "" });
           }
       } catch (e) { alert("Erro ao salvar"); }
       finally { setSaving(false); }
@@ -128,11 +153,14 @@ export default function AddressesPage() {
                             <p className="text-xs text-slate-500">{addr.district} • {addr.regionType === 'plano_diretor' ? 'Plano Diretor' : addr.sectorName}</p>
                         </div>
                     </div>
-                    <button onClick={() => handleDelete(addr.id)} className="text-gray-400 hover:text-red-500 p-2"><Trash2 size={18}/></button>
+                    <div className="flex gap-1">
+                        <button onClick={() => openEdit(addr)} className="text-gray-400 hover:text-blue-600 p-2"><Pencil size={18}/></button>
+                        <button onClick={() => handleDelete(addr.id)} className="text-gray-400 hover:text-red-500 p-2"><Trash2 size={18}/></button>
+                    </div>
                 </div>
             ))}
 
-            <button onClick={() => setIsModalOpen(true)} className="w-full py-4 border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center gap-2 text-slate-500 font-bold hover:bg-gray-50 hover:border-pink-300 hover:text-pink-600 transition">
+            <button onClick={openNew} className="w-full py-4 border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center gap-2 text-slate-500 font-bold hover:bg-gray-50 hover:border-pink-300 hover:text-pink-600 transition">
                 <Plus size={20}/> Cadastrar Novo Endereço
             </button>
         </div>
@@ -142,7 +170,7 @@ export default function AddressesPage() {
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
                 <div className="bg-white w-full max-w-md rounded-2xl p-6 h-[85vh] sm:h-auto overflow-y-auto animate-in slide-in-from-bottom shadow-2xl relative">
                     <button onClick={() => setIsModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X/></button>
-                    <h2 className="font-bold text-lg mb-6 text-slate-800">Novo Endereço</h2>
+                    <h2 className="font-bold text-lg mb-6 text-slate-800">{editingId ? 'Editar Endereço' : 'Novo Endereço'}</h2>
                     
                     <div className="space-y-4">
                         <div>
