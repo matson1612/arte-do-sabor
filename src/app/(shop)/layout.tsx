@@ -19,7 +19,7 @@ export default function ShopLayout({ children }: { children: React.ReactNode }) 
                 <img 
                     src="/faixa.png" 
                     alt="" 
-                    className="rotate-180 min-w-[150vh] h-54 object-repeat object-center" 
+                    className="rotate-270 min-w-[150vh] h-54 object-repeat object-center" 
                 />
             </div>
         </div>

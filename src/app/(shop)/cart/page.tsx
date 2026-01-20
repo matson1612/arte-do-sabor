@@ -3,7 +3,7 @@
 
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
-import { Trash2, ArrowLeft, Send, MapPin, Search, Loader2, ShoppingBag, CreditCard, FileText, CheckCircle, Plus, Minus, AlertTriangle, Phone } from "lucide-react";
+import { Trash2, ArrowLeft, Send, MapPin, Search, Loader2, ShoppingBag, CreditCard, FileText, CheckCircle, Plus, Minus, AlertTriangle, Phone, QrCode, Copy, X, Link as LinkIcon, Banknote } from "lucide-react";
 import { useState, useEffect } from "react";
 import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
 import { db } from "@/lib/firebase";
@@ -11,37 +11,44 @@ import { doc, getDoc, addDoc, collection, serverTimestamp, runTransaction, updat
 import Link from "next/link";
 import { generateShortId } from "@/utils/generateId"; 
 import { Option } from "@/types";
+import { QRCodeSVG } from "qrcode.react"; // Biblioteca de QR Code
+import { generatePixCopyPaste } from "@/utils/pix"; // Utilitário de PIX
 
 const PHONE_NUMBER = "5563981221181"; 
 const GOOGLE_MAPS_API_KEY = "AIzaSyBy365txh8nJ9JuGfvyPGdW5-angEXWBj8"; 
 const DEFAULT_CENTER = { lat: -10.183760, lng: -48.333650 }; 
-const REGIONS = [
-    { id: 'plano', label: 'Plano Diretor / Centro', price: 'gps' },
-    { id: 'taquaralto', label: 'Taquaralto e Região (Fixo R$ 15)', price: 15.00 },
-    { id: 'luzimangues', label: 'Luzimangues (Fixo R$ 25)', price: 25.00 },
-];
 
 export default function CartPage() {
   const { items, removeFromCart, updateQuantity, clearCart, cartTotal } = useCart();
   const { user, loginGoogle, profile } = useAuth();
   
+  // Estados de Pagamento e Entrega
   const [deliveryMethod, setDeliveryMethod] = useState<'delivery' | 'pickup'>('delivery');
-  const [paymentMethod, setPaymentMethod] = useState('pix');
+  const [paymentMethod, setPaymentMethod] = useState('pix'); // Padrão PIX
+  
+  // Endereço
   const [savedAddresses, setSavedAddresses] = useState<any[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
   const [address, setAddress] = useState({ street: "", number: "", district: "", complement: "" });
   const [cepInput, setCepInput] = useState("");
   const [userLocation, setUserLocation] = useState(DEFAULT_CENTER);
+  
+  // Controle
   const [shippingPrice, setShippingPrice] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [stockWarnings, setStockWarnings] = useState<string[]>([]);
   const [missingPhone, setMissingPhone] = useState("");
 
+  // PIX Modal
+  const [showPixModal, setShowPixModal] = useState(false);
+  const [pixCode, setPixCode] = useState("");
+  const [pixCopied, setPixCopied] = useState(false);
+
   const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_MAPS_API_KEY });
   const isMonthlyOrReseller = profile?.clientType === 'monthly' || profile?.clientType === 'reseller';
 
   useEffect(() => {
-    // Validação Visual de Estoque ao Carregar
+    // Validação de Estoque
     const validateCartStock = async () => {
         if (items.length === 0) return;
         const warnings: string[] = [];
@@ -78,11 +85,23 @@ export default function CartPage() {
 
   useEffect(() => {
     if (paymentMethod === 'conta_aberta' || deliveryMethod === 'pickup') setShippingPrice(0);
-    else {
-        // Lógica de frete fixo simplificada
-        setShippingPrice(8.00); 
-    }
+    else setShippingPrice(8.00); // Frete Fixo Exemplo
   }, [deliveryMethod, paymentMethod]);
+
+  // Gerar PIX ao abrir modal
+  const handleOpenPix = () => {
+      const total = cartTotal + shippingPrice;
+      const code = generatePixCopyPaste(total);
+      setPixCode(code);
+      setPixCopied(false);
+      setShowPixModal(true);
+  };
+
+  const handleCopyPix = () => {
+      navigator.clipboard.writeText(pixCode);
+      setPixCopied(true);
+      setTimeout(() => setPixCopied(false), 2000);
+  };
 
   const handleBuscaCep = async () => { 
       const cep = cepInput.replace(/\D/g, '');
@@ -119,103 +138,63 @@ export default function CartPage() {
     const shortId = generateShortId(); 
 
     try {
-        // Salva telefone se não existir
         if (!profile?.phone && missingPhone) {
             await updateDoc(doc(db, "users", user.uid), { phone: missingPhone });
         }
 
         await runTransaction(db, async (transaction) => {
-            // --- PASSO 1: CALCULAR DEMANDA ---
-            // Agrupa quanto precisa ser baixado de cada produto/opção
+            // ... (Lógica de Estoque Mantida igual ao anterior) ...
             const productDecrements = new Map<string, number>();
             const groupOptionDecrements = new Map<string, Map<string, number>>();
-
-            const addProdDec = (id: string, qty: number) => {
-                const current = productDecrements.get(id) || 0;
-                productDecrements.set(id, current + qty);
-            };
+            const addProdDec = (id: string, qty: number) => { const current = productDecrements.get(id) || 0; productDecrements.set(id, current + qty); };
 
             for (const item of items) {
-                // Produto Principal
                 if (item.id) addProdDec(item.id, item.quantity);
-                
-                // Complementos
                 if (item.selectedOptions) {
                     for (const [groupId, opts] of Object.entries(item.selectedOptions)) {
                         for (const opt of (opts as Option[])) {
-                            if (opt.linkedProductId) {
-                                // Produto Vinculado: Baixa do produto original
-                                addProdDec(opt.linkedProductId, item.quantity);
-                            } else {
-                                // Opção Simples: Baixa do grupo
+                            if (opt.linkedProductId) addProdDec(opt.linkedProductId, item.quantity);
+                            else {
                                 if (!groupOptionDecrements.has(groupId)) groupOptionDecrements.set(groupId, new Map());
                                 const grpMap = groupOptionDecrements.get(groupId)!;
-                                const currOptQty = grpMap.get(opt.id) || 0;
-                                grpMap.set(opt.id, currOptQty + item.quantity);
+                                grpMap.set(opt.id, (grpMap.get(opt.id) || 0) + item.quantity);
                             }
                         }
                     }
                 }
             }
 
-            // --- PASSO 2: LEITURAS (READS) ---
-            // Lê todos os documentos necessários DE UMA VEZ
             const productSnaps = new Map();
             const groupSnaps = new Map();
 
-            // Ler Produtos
-            for (const prodId of productDecrements.keys()) {
-                const ref = doc(db, "products", prodId);
-                const snap = await transaction.get(ref);
-                productSnaps.set(prodId, snap);
-            }
+            for (const prodId of productDecrements.keys()) { const ref = doc(db, "products", prodId); productSnaps.set(prodId, await transaction.get(ref)); }
+            for (const groupId of groupOptionDecrements.keys()) { const ref = doc(db, "complement_groups", groupId); groupSnaps.set(groupId, await transaction.get(ref)); }
 
-            // Ler Grupos
-            for (const groupId of groupOptionDecrements.keys()) {
-                const ref = doc(db, "complement_groups", groupId);
-                const snap = await transaction.get(ref);
-                groupSnaps.set(groupId, snap);
-            }
-
-            // --- PASSO 3: VALIDAÇÃO E ESCRITAS (WRITES) ---
-            
-            // Atualizar Produtos
-            for (const [prodId, qtyToRemove] of productDecrements.entries()) {
+            for (const [prodId, qty] of productDecrements.entries()) {
                 const snap = productSnaps.get(prodId);
-                if (!snap.exists()) throw new Error(`Produto (ID: ${prodId}) não encontrado.`);
-                
-                const currentStock = snap.data().stock;
-                if (currentStock !== null) {
-                    if (currentStock < qtyToRemove) {
-                        throw new Error(`Estoque insuficiente para "${snap.data().name}". Disponível: ${currentStock}.`);
-                    }
-                    transaction.update(doc(db, "products", prodId), { stock: currentStock - qtyToRemove });
+                if (!snap.exists()) throw new Error("Produto não encontrado.");
+                const current = snap.data().stock;
+                if (current !== null) {
+                    if (current < qty) throw new Error(`Estoque insuficiente: ${snap.data().name}`);
+                    transaction.update(doc(db, "products", prodId), { stock: current - qty });
                 }
             }
 
-            // Atualizar Grupos
-            for (const [groupId, optsToRemove] of groupOptionDecrements.entries()) {
+            for (const [groupId, opts] of groupOptionDecrements.entries()) {
                 const snap = groupSnaps.get(groupId);
-                if (!snap.exists()) throw new Error(`Grupo de opções não encontrado.`);
-                
-                const optionsList = snap.data().options || [];
-                let changed = false;
-
-                for (const [optId, qty] of optsToRemove.entries()) {
-                    const idx = optionsList.findIndex((o:any) => o.id === optId);
-                    if (idx !== -1 && optionsList[idx].stock !== null) {
-                        if (optionsList[idx].stock < qty) throw new Error(`Estoque insuficiente para opção "${optionsList[idx].name}".`);
-                        optionsList[idx].stock -= qty;
-                        changed = true;
+                const list = snap.data().options || [];
+                let chg = false;
+                for (const [optId, qty] of opts.entries()) {
+                    const idx = list.findIndex((o:any) => o.id === optId);
+                    if (idx !== -1 && list[idx].stock !== null) {
+                        if (list[idx].stock < qty) throw new Error(`Sem estoque: ${list[idx].name}`);
+                        list[idx].stock -= qty;
+                        chg = true;
                     }
                 }
-                
-                if (changed) {
-                    transaction.update(doc(db, "complement_groups", groupId), { options: optionsList });
-                }
+                if (chg) transaction.update(doc(db, "complement_groups", groupId), { options: list });
             }
 
-            // Criar Pedido
             const newOrderRef = doc(collection(db, "orders"));
             transaction.set(newOrderRef, {
                 shortId: shortId,
@@ -234,28 +213,38 @@ export default function CartPage() {
             });
         });
 
-        // Sucesso
-        let msg = `*PEDIDO #${shortId} - ${profile?.name || user.displayName}*\n`;
+        // Formatação da Mensagem
+        let payText = "Outros";
+        if (paymentMethod === 'pix') payText = "PIX";
+        if (paymentMethod === 'link_debito') payText = "Link Débito (Enviar Link)";
+        if (paymentMethod === 'link_credito') payText = "Link Crédito (Enviar Link)";
+        if (paymentMethod === 'money') payText = "Dinheiro";
+        if (paymentMethod === 'conta_aberta') payText = "Conta Mensal";
+
+        let msg = `*PEDIDO #${shortId}* - ${profile?.name || user.displayName}\n`;
         if (paymentMethod === 'conta_aberta') msg += `⚠️ *PEDIDO NA CONTA*\n`;
         msg += `--------------------------------\n`;
         items.forEach(i => msg += `${i.quantity}x ${i.name}\n`);
         
-        if (deliveryMethod === 'delivery') {
-            msg += `📦 *Entrega*\n`;
-        } else {
-            msg += `🏪 *Retirada*\n`;
-        }
+        if (deliveryMethod === 'delivery') msg += `📦 *Entrega*\n`;
+        else msg += `🏪 *Retirada*\n`;
         
-        const payText = paymentMethod === 'conta_aberta' ? 'CONTA MENSAL' : paymentMethod.toUpperCase();
         msg += `💳 Pagamento: ${payText}\n📞: ${finalPhone}\n\n*TOTAL: R$ ${finalTotal.toFixed(2)}*`;
 
         window.open(`https://wa.me/${PHONE_NUMBER}?text=${encodeURIComponent(msg)}`, "_blank");
-        clearCart();
+        
+        // Se for PIX, sugere abrir o modal de pagamento se o usuário ainda não pagou
+        if (paymentMethod === 'pix') {
+             const confirmPix = confirm("Pedido Enviado! Deseja ver o código PIX para pagamento agora?");
+             if(confirmPix) handleOpenPix();
+             else clearCart();
+        } else {
+            clearCart();
+        }
 
     } catch (error: any) {
         console.error(error);
-        alert(error.message || "Erro ao processar pedido. Tente novamente.");
-        window.location.reload();
+        alert(error.message || "Erro ao processar pedido.");
     } finally {
         setIsSubmitting(false);
     }
@@ -267,6 +256,7 @@ export default function CartPage() {
     <div className="pb-40 pt-2 px-4 max-w-2xl mx-auto">
       <div className="flex items-center gap-2 mb-6"><Link href="/"><ArrowLeft/></Link><h1 className="font-bold text-lg">Seu Pedido</h1></div>
 
+      {/* Avisos de Estoque */}
       {stockWarnings.length > 0 && (
           <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4 rounded-r">
               <div className="flex items-center gap-2 mb-2"><AlertTriangle className="text-yellow-600" size={20}/><span className="font-bold text-yellow-700">Atenção ao Estoque</span></div>
@@ -274,6 +264,7 @@ export default function CartPage() {
           </div>
       )}
 
+      {/* Lista de Itens */}
       <div className="space-y-3 mb-6">
         {items.map(item => (
             <div key={item.cartId} className="bg-white p-3 rounded-xl border flex justify-between items-center shadow-sm">
@@ -285,26 +276,58 @@ export default function CartPage() {
         ))}
       </div>
 
+      {/* Telefone Obrigatório */}
       {user && !profile?.phone && (
           <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl mb-4 animate-in slide-in-from-left">
               <label className="text-sm font-bold text-orange-800 flex items-center gap-2 mb-2"><Phone size={16}/> WhatsApp para Contato (Obrigatório)</label>
               <input className="w-full p-3 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none" placeholder="(00) 00000-0000" value={missingPhone} onChange={e => setMissingPhone(e.target.value)}/>
-              <p className="text-[10px] text-orange-600 mt-1">Necessário para confirmar seu pedido.</p>
           </div>
       )}
 
+      {/* Pagamento */}
       <div className="bg-white p-4 rounded-xl shadow-sm border mb-4">
         <h2 className="font-bold text-sm mb-3 flex items-center gap-2"><CreditCard size={16}/> Forma de Pagamento</h2>
-        <div className="grid grid-cols-3 gap-2">
-            {['pix', 'card', 'money'].map(p => (
-                <button key={p} onClick={() => setPaymentMethod(p)} className={`py-2 border rounded text-xs font-bold capitalize ${paymentMethod === p ? 'bg-pink-50 border-pink-500 text-pink-700' : 'text-gray-600'}`}>{p === 'card' ? 'Cartão' : p === 'money' ? 'Dinheiro' : 'PIX'}</button>
-            ))}
-            {isMonthlyOrReseller && (
-                <button onClick={() => setPaymentMethod('conta_aberta')} className={`col-span-3 py-3 border-2 border-dashed rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'conta_aberta' ? 'bg-purple-100 border-purple-500 text-purple-700' : 'border-purple-200 text-purple-600'}`}><FileText size={18}/> Pagar na Conta / Boleta</button>
-            )}
+        
+        <div className="grid grid-cols-2 gap-2">
+            {/* PIX */}
+            <button onClick={() => setPaymentMethod('pix')} className={`py-3 px-2 border rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'pix' ? 'bg-emerald-50 border-emerald-500 text-emerald-700 ring-1 ring-emerald-500' : 'bg-white text-gray-600 border-gray-200'}`}>
+                <QrCode size={18}/> PIX (QR Code)
+            </button>
+            {/* Dinheiro */}
+            <button onClick={() => setPaymentMethod('money')} className={`py-3 px-2 border rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'money' ? 'bg-green-50 border-green-600 text-green-800 ring-1 ring-green-600' : 'bg-white text-gray-600 border-gray-200'}`}>
+                <Banknote size={18}/> Dinheiro
+            </button>
+            {/* Links */}
+            <button onClick={() => setPaymentMethod('link_debito')} className={`py-3 px-2 border rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'link_debito' ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500' : 'bg-white text-gray-600 border-gray-200'}`}>
+                <LinkIcon size={18}/> Link Débito
+            </button>
+            <button onClick={() => setPaymentMethod('link_credito')} className={`py-3 px-2 border rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'link_credito' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 ring-1 ring-indigo-500' : 'bg-white text-gray-600 border-gray-200'}`}>
+                <LinkIcon size={18}/> Link Crédito
+            </button>
         </div>
+
+        {/* Botão Extra para Gerar PIX Agora */}
+        {paymentMethod === 'pix' && (
+            <div className="mt-3 p-3 bg-emerald-50 rounded-lg border border-emerald-100 flex items-center justify-between">
+                <div className="text-xs text-emerald-800">
+                    <p className="font-bold">Pagar com PIX</p>
+                    <p>Gere o código para pagar agora.</p>
+                </div>
+                <button onClick={handleOpenPix} className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm hover:bg-emerald-700">
+                    Gerar QR Code
+                </button>
+            </div>
+        )}
+
+        {/* Conta Aberta (Mensalistas) */}
+        {isMonthlyOrReseller && (
+            <button onClick={() => setPaymentMethod('conta_aberta')} className={`w-full mt-2 py-3 border-2 border-dashed rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'conta_aberta' ? 'bg-purple-100 border-purple-500 text-purple-700' : 'border-purple-200 text-purple-600'}`}>
+                <FileText size={18}/> Pagar na Conta / Boleta
+            </button>
+        )}
       </div>
 
+      {/* Entrega */}
       {paymentMethod !== 'conta_aberta' && (
           <div className="bg-white p-4 rounded-xl shadow-sm border space-y-4 mb-4">
             <h2 className="font-bold text-sm flex gap-2 items-center"><MapPin size={16} className="text-pink-600"/> Entrega</h2>
@@ -336,6 +359,7 @@ export default function CartPage() {
           </div>
       )}
 
+      {/* Footer Total */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 shadow-lg safe-area-bottom z-40">
         <div className="max-w-2xl mx-auto space-y-3">
              <div className="flex justify-between font-bold text-lg text-gray-800"><span>Total</span><span className="text-green-600">R$ {(cartTotal + shippingPrice).toFixed(2)}</span></div>
@@ -344,6 +368,27 @@ export default function CartPage() {
             </button>
         </div>
       </div>
+
+      {/* MODAL PIX */}
+      {showPixModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl p-6 relative animate-in zoom-in-95 duration-300">
+                  <button onClick={() => setShowPixModal(false)} className="absolute top-4 right-4 text-stone-400 hover:text-stone-600 p-2 rounded-full hover:bg-stone-100"><X size={20}/></button>
+                  <div className="text-center mb-6">
+                      <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3"><QrCode size={24}/></div>
+                      <h3 className="text-xl font-bold text-stone-800">Pagamento PIX</h3>
+                      <p className="text-sm text-stone-500">Valor Total: <strong className="text-emerald-600">R$ {(cartTotal + shippingPrice).toFixed(2)}</strong></p>
+                  </div>
+                  <div className="flex justify-center mb-6 p-4 bg-white border-2 border-stone-100 rounded-2xl shadow-inner">
+                      <QRCodeSVG value={pixCode} size={200} />
+                  </div>
+                  <button onClick={handleCopyPix} className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${pixCopied ? 'bg-green-600 text-white' : 'bg-stone-900 text-white hover:bg-stone-800'}`}>
+                      {pixCopied ? <CheckCircle size={18}/> : <Copy size={18}/>}
+                      {pixCopied ? "Código Copiado!" : "Copiar Código PIX"}
+                  </button>
+              </div>
+          </div>
+      )}
     </div>
   );
 }
