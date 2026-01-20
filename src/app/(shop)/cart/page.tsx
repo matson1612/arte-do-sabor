@@ -7,27 +7,29 @@ import { Trash2, ArrowLeft, Send, MapPin, Search, Loader2, ShoppingBag, CreditCa
 import { useState, useEffect, useRef } from "react";
 import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
 import { db } from "@/lib/firebase";
-import { doc, getDoc, collection, serverTimestamp, runTransaction, updateDoc } from "firebase/firestore";
+import { doc, getDoc, addDoc, collection, serverTimestamp, runTransaction, updateDoc } from "firebase/firestore";
 import Link from "next/link";
 import { generateShortId } from "@/utils/generateId"; 
 import { Option, StoreSettings, UserAddress } from "@/types";
 import { QRCodeSVG } from "qrcode.react"; 
 import { generatePixCopyPaste } from "@/utils/pix";
 
+// ⚠️ Mantenha sua chave aqui
 const GOOGLE_MAPS_API_KEY = "AIzaSyBy365txh8nJ9JuGfvyPGdW5-angEXWBj8"; 
 const DEFAULT_CENTER = { lat: -10.183760, lng: -48.333650 }; 
 
 export default function CartPage() {
   const { items, removeFromCart, updateQuantity, clearCart, cartTotal } = useCart();
   const { user, loginGoogle, profile } = useAuth();
+  
   const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_MAPS_API_KEY });
   
-  // Dados
+  // --- NOVOS ESTADOS ---
   const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
-  const [savedAddresses, setSavedAddresses] = useState<UserAddress[]>([]);
+  const [savedAddresses, setSavedAddresses] = useState<UserAddress[]>([]); // Tipagem corrigida
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
 
-  // Carrinho
+  // Estados Visuais Originais
   const [deliveryMethod, setDeliveryMethod] = useState<'delivery' | 'pickup'>('delivery');
   const [paymentMethod, setPaymentMethod] = useState('pix');
   const [shippingPrice, setShippingPrice] = useState(0);
@@ -35,25 +37,59 @@ export default function CartPage() {
   const [stockWarnings, setStockWarnings] = useState<string[]>([]);
   const [missingPhone, setMissingPhone] = useState("");
 
-  // Modal Novo Endereço
+  // Modal Novo Endereço (Lógica Nova)
   const [isAddrModalOpen, setIsAddrModalOpen] = useState(false);
   const [newAddr, setNewAddr] = useState<Partial<UserAddress>>({
-      regionType: 'plano_diretor',
+      regionType: 'plano_diretor', // Padrão
       street: "", number: "", district: "", complement: "", nickname: "Casa", cep: ""
   });
   const [addrMapLoc, setAddrMapLoc] = useState(DEFAULT_CENTER);
 
-  // PIX
+  // PIX Modal
   const [showPixModal, setShowPixModal] = useState(false);
   const [pixCode, setPixCode] = useState("");
   const [pixCopied, setPixCopied] = useState(false);
 
+  const isMonthlyOrReseller = profile?.clientType === 'monthly' || profile?.clientType === 'reseller';
+
+  // 1. Carregar Configurações da Loja (Frete, PIX, etc)
   useEffect(() => {
-      getDoc(doc(db, "store_settings", "config")).then(snap => {
-          if (snap.exists()) setStoreSettings(snap.data() as StoreSettings);
-      });
+      const loadConfig = async () => {
+          try {
+              const snap = await getDoc(doc(db, "store_settings", "config"));
+              if (snap.exists()) setStoreSettings(snap.data() as StoreSettings);
+          } catch(e) { console.error("Erro config", e); }
+      };
+      loadConfig();
   }, []);
 
+  // 2. Validação de Estoque (Original)
+  useEffect(() => {
+    const validateCartStock = async () => {
+        if (items.length === 0) return;
+        const warnings: string[] = [];
+        for (const item of items) {
+            if (!item.id) continue;
+            try {
+                const prodSnap = await getDoc(doc(db, "products", item.id));
+                if (prodSnap.exists()) {
+                    const realStock = prodSnap.data().stock;
+                    if (realStock !== null && realStock <= 0) {
+                        warnings.push(`"${item.name}" esgotou.`);
+                        removeFromCart(item.cartId);
+                    } else if (realStock !== null && item.quantity > realStock) {
+                        warnings.push(`"${item.name}": Qtd ajustada para ${realStock}.`);
+                        updateQuantity(item.cartId, realStock);
+                    }
+                }
+            } catch (e) { console.error(e); }
+        }
+        if (warnings.length > 0) setStockWarnings(warnings);
+    };
+    validateCartStock();
+  }, []); 
+
+  // 3. Carregar Endereços do Usuário
   useEffect(() => {
     if (!user) return;
     getDoc(doc(db, "users", user.uid)).then(snap => {
@@ -64,7 +100,7 @@ export default function CartPage() {
     });
   }, [user]);
 
-  // CÁLCULO DE FRETE INTELIGENTE
+  // 4. CÁLCULO DE FRETE INTELIGENTE (Nova Lógica)
   useEffect(() => {
     if (deliveryMethod === 'pickup') { setShippingPrice(0); return; }
     if (!storeSettings || !selectedAddressId) return;
@@ -74,7 +110,7 @@ export default function CartPage() {
 
     let price = 0;
 
-    // Caso 1: Plano Diretor (Distância)
+    // Caso 1: Plano Diretor (Usa Tabela de Distância)
     if (addr.regionType === 'plano_diretor' && addr.location && storeSettings.location && window.google) {
         const from = new window.google.maps.LatLng(storeSettings.location.lat, storeSettings.location.lng);
         const to = new window.google.maps.LatLng(addr.location.lat, addr.location.lng);
@@ -84,34 +120,57 @@ export default function CartPage() {
         const rule = storeSettings.shipping.distanceTable.find(r => distKm >= r.minKm && distKm <= r.maxKm);
         if (rule) price = rule.price;
         else {
-            // Se exceder a tabela, pega o último valor
+            // Se passar da tabela, usa o último valor (ou trate como erro)
             const maxRule = storeSettings.shipping.distanceTable[storeSettings.shipping.distanceTable.length - 1];
             price = maxRule ? maxRule.price : 0;
         }
     } 
-    // Caso 2: Outras Localidades (Fixo ou Misto)
+    // Caso 2: Outras Localidades (Usa Setor Fixo ou Misto)
     else if (addr.regionType === 'outras_localidades' && addr.sectorName) {
         const area = storeSettings.shipping.fixedAreas.find(a => a.name === addr.sectorName);
         if (area) {
             if (area.type === 'fixed') {
                 price = area.price;
             } else if (area.type === 'km_plus_tax' && addr.location && storeSettings.location && window.google) {
-                // Km + Taxa
+                // Km + Taxa Fixa
                 const from = new window.google.maps.LatLng(storeSettings.location.lat, storeSettings.location.lng);
                 const to = new window.google.maps.LatLng(addr.location.lat, addr.location.lng);
                 const distKm = window.google.maps.geometry.spherical.computeDistanceBetween(from, to) / 1000;
                 
-                // Ex: R$ 2,00 por Km (base) + Taxa fixa
-                const baseKmPrice = 2; // Poderia vir do settings também
+                // R$ 2,00 por Km (base) + Taxa fixa do setor
+                const baseKmPrice = 2; 
                 price = (distKm * baseKmPrice) + (area.tax || 0);
             }
         }
     }
-    setShippingPrice(price);
-  }, [deliveryMethod, selectedAddressId, storeSettings, savedAddresses]);
 
+    // Verifica Frete Grátis
+    if(storeSettings.shipping.freeShippingAbove && storeSettings.shipping.freeShippingAbove > 0) {
+        if(cartTotal >= storeSettings.shipping.freeShippingAbove) price = 0;
+    }
+
+    setShippingPrice(price);
+  }, [deliveryMethod, selectedAddressId, storeSettings, savedAddresses, cartTotal]);
+
+  // --- FUNÇÕES DE AÇÃO ---
+
+  const handleOpenPix = () => {
+      const total = cartTotal + shippingPrice;
+      const code = generatePixCopyPaste(total, storeSettings?.pix); // Usa a chave do admin
+      setPixCode(code);
+      setPixCopied(false);
+      setShowPixModal(true);
+  };
+
+  const handleCopyPix = () => {
+      navigator.clipboard.writeText(pixCode);
+      setPixCopied(true);
+      setTimeout(() => setPixCopied(false), 2000);
+  };
+
+  // Salvar Novo Endereço (Modal)
   const handleSaveAddress = async () => {
-      if(!newAddr.street || !newAddr.number) return alert("Preencha o endereço completo.");
+      if(!newAddr.street || !newAddr.number) return alert("Preencha rua e número");
       if(!user) return;
 
       const addressData: UserAddress = {
@@ -122,6 +181,7 @@ export default function CartPage() {
 
       const updatedList = [...savedAddresses, addressData];
       await updateDoc(doc(db, "users", user.uid), { savedAddresses: updatedList });
+      
       setSavedAddresses(updatedList);
       setSelectedAddressId(addressData.id);
       setIsAddrModalOpen(false);
@@ -147,73 +207,254 @@ export default function CartPage() {
       } catch(e) { alert("Erro CEP"); }
   };
 
-  const handleOpenPix = () => {
-      const total = cartTotal + shippingPrice;
-      const code = generatePixCopyPaste(total, storeSettings?.pix);
-      setPixCode(code); setPixCopied(false); setShowPixModal(true);
-  };
-
-  const handleCopyPix = () => { navigator.clipboard.writeText(pixCode); setPixCopied(true); setTimeout(() => setPixCopied(false), 2000); };
-
   const handleCheckout = async () => {
-      // (Lógica de transação igual à original para manter segurança de estoque)
-      // ...
-      // Na construção da mensagem do WhatsApp:
-      const finalTotal = cartTotal + shippingPrice;
-      let msg = `*NOVO PEDIDO* - ${profile?.name || user?.displayName}\n`;
-      // ... itens ...
-      if(deliveryMethod === 'delivery') {
-          const addr = savedAddresses.find(a => a.id === selectedAddressId);
-          msg += `📦 *Entrega (${addr?.regionType === 'plano_diretor' ? 'Plano Diretor' : addr?.sectorName})*\n`;
-          msg += `📍 ${addr?.street}, ${addr?.number} - ${addr?.district}\n`;
-          if(addr?.complement) msg += `Obs: ${addr.complement}\n`;
-          if(addr?.location) msg += `🗺️ Maps: https://www.google.com/maps/search/?api=1&query=${addr.location.lat},${addr.location.lng}\n`;
-      }
-      msg += `\n💰 Produtos: R$ ${cartTotal.toFixed(2)}\n🚚 Frete: R$ ${shippingPrice.toFixed(2)}\n*TOTAL: R$ ${finalTotal.toFixed(2)}*\n\n💳 Pagamento: ${paymentMethod}`;
-      
-      const phone = storeSettings?.whatsapp || "5563981221181";
-      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
-      
-      if(paymentMethod === 'pix') { if(confirm("Abrir PIX?")) handleOpenPix(); else clearCart(); }
-      else clearCart();
+    if (!user) { loginGoogle(); return; }
+    if (isSubmitting) return;
+
+    const finalPhone = profile?.phone || missingPhone;
+    if (!finalPhone || finalPhone.length < 8) return alert("Informe um WhatsApp válido para contato.");
+
+    const selectedAddr = savedAddresses.find(a => a.id === selectedAddressId);
+    if (deliveryMethod === 'delivery' && !selectedAddr && paymentMethod !== 'conta_aberta') {
+        return alert("Por favor, selecione um endereço.");
+    }
+
+    setIsSubmitting(true);
+    const finalTotal = cartTotal + shippingPrice;
+    const shortId = generateShortId(); 
+
+    try {
+        if (!profile?.phone && missingPhone) {
+            await updateDoc(doc(db, "users", user.uid), { phone: missingPhone });
+        }
+
+        await runTransaction(db, async (transaction) => {
+            // (Logica de estoque original mantida intacta)
+            const productDecrements = new Map<string, number>();
+            const groupOptionDecrements = new Map<string, Map<string, number>>();
+            const addProdDec = (id: string, qty: number) => { const current = productDecrements.get(id) || 0; productDecrements.set(id, current + qty); };
+
+            for (const item of items) {
+                if (item.id) addProdDec(item.id, item.quantity);
+                if (item.selectedOptions) {
+                    for (const [groupId, opts] of Object.entries(item.selectedOptions)) {
+                        for (const opt of (opts as Option[])) {
+                            if (opt.linkedProductId) addProdDec(opt.linkedProductId, item.quantity);
+                            else {
+                                if (!groupOptionDecrements.has(groupId)) groupOptionDecrements.set(groupId, new Map());
+                                const grpMap = groupOptionDecrements.get(groupId)!;
+                                grpMap.set(opt.id, (grpMap.get(opt.id) || 0) + item.quantity);
+                            }
+                        }
+                    }
+                }
+            }
+
+            const productSnaps = new Map();
+            const groupSnaps = new Map();
+
+            for (const prodId of productDecrements.keys()) { const ref = doc(db, "products", prodId); productSnaps.set(prodId, await transaction.get(ref)); }
+            for (const groupId of groupOptionDecrements.keys()) { const ref = doc(db, "complement_groups", groupId); groupSnaps.set(groupId, await transaction.get(ref)); }
+
+            for (const [prodId, qty] of productDecrements.entries()) {
+                const snap = productSnaps.get(prodId);
+                if (!snap.exists()) throw new Error("Produto não encontrado.");
+                const current = snap.data().stock;
+                if (current !== null) {
+                    if (current < qty) throw new Error(`Estoque insuficiente: ${snap.data().name}`);
+                    transaction.update(doc(db, "products", prodId), { stock: current - qty });
+                }
+            }
+
+            for (const [groupId, opts] of groupOptionDecrements.entries()) {
+                const snap = groupSnaps.get(groupId);
+                const list = snap.data().options || [];
+                let chg = false;
+                for (const [optId, qty] of opts.entries()) {
+                    const idx = list.findIndex((o:any) => o.id === optId);
+                    if (idx !== -1 && list[idx].stock !== null) {
+                        if (list[idx].stock < qty) throw new Error(`Sem estoque: ${list[idx].name}`);
+                        list[idx].stock -= qty;
+                        chg = true;
+                    }
+                }
+                if (chg) transaction.update(doc(db, "complement_groups", groupId), { options: list });
+            }
+
+            const newOrderRef = doc(collection(db, "orders"));
+            transaction.set(newOrderRef, {
+                shortId: shortId,
+                userId: user.uid,
+                userName: profile?.name || user.displayName,
+                userPhone: finalPhone,
+                items: JSON.stringify(items),
+                total: finalTotal,
+                status: 'em_aberto',
+                paymentMethod: paymentMethod,
+                deliveryMethod: deliveryMethod,
+                createdAt: serverTimestamp(),
+                shippingPrice: shippingPrice,
+                address: deliveryMethod === 'delivery' ? selectedAddr : null,
+                isPaid: false 
+            });
+        });
+
+        // Formatação da Mensagem (Atualizada)
+        const payConfig = storeSettings?.paymentMethods[paymentMethod as keyof typeof storeSettings.paymentMethods];
+        const payText = payConfig ? payConfig.label : paymentMethod.toUpperCase();
+
+        let msg = `*PEDIDO #${shortId}* - ${profile?.name || user.displayName}\n`;
+        if (paymentMethod === 'conta_aberta') msg += `⚠️ *PEDIDO NA CONTA*\n`;
+        msg += `--------------------------------\n`;
+        items.forEach(i => msg += `${i.quantity}x ${i.name}\n`);
+        
+        if (deliveryMethod === 'delivery') {
+            const addr = savedAddresses.find(a => a.id === selectedAddressId);
+            msg += `📦 *Entrega (${addr?.regionType === 'plano_diretor' ? 'Plano Diretor' : addr?.sectorName})*\n`;
+            msg += `📍 ${addr?.street}, ${addr?.number} - ${addr?.district}\n`;
+            if(addr?.complement) msg += `Obs: ${addr.complement}\n`;
+            if(addr?.location) msg += `🗺️ Maps: http://googleusercontent.com/maps.google.com/?q=${addr.location.lat},${addr.location.lng}\n`;
+        } else {
+            msg += `🏪 *Retirada no Balcão*\n`;
+        }
+        
+        msg += `💳 Pagamento: ${payText}\n📞: ${finalPhone}\n\n*TOTAL: R$ ${finalTotal.toFixed(2)}*`;
+
+        const phone = storeSettings?.whatsapp || "5563981221181";
+        window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+        
+        if (paymentMethod === 'pix') {
+             const confirmPix = confirm("Pedido Enviado! Deseja ver o código PIX para pagamento agora?");
+             if(confirmPix) handleOpenPix();
+             else clearCart();
+        } else {
+            clearCart();
+        }
+
+    } catch (error: any) {
+        console.error(error);
+        alert(error.message || "Erro ao processar pedido.");
+    } finally {
+        setIsSubmitting(false);
+    }
   };
 
-  if (items.length === 0) return <div className="p-10 text-center"><ShoppingBag className="mx-auto mb-4 text-gray-300" size={64}/><p>Carrinho vazio.</p><Link href="/" className="text-pink-600 font-bold">Voltar</Link></div>;
+  if (items.length === 0) return <div className="p-10 text-center flex flex-col items-center justify-center min-h-[60vh]"><ShoppingBag className="text-gray-200 mb-4" size={64}/><p className="text-gray-500 font-medium">Seu carrinho está vazio.</p><Link href="/" className="text-pink-600 font-bold mt-4 hover:underline">Voltar ao Cardápio</Link></div>;
 
   return (
-    <div className="pb-40 pt-4 px-4 max-w-2xl mx-auto">
-        <h1 className="font-bold text-xl mb-6">Finalizar Pedido</h1>
+    <div className="pb-40 pt-2 px-4 max-w-2xl mx-auto">
+      <div className="flex items-center gap-2 mb-6"><Link href="/"><ArrowLeft/></Link><h1 className="font-bold text-lg">Seu Pedido</h1></div>
 
-        {/* Entrega */}
-        <div className="bg-white p-4 rounded-xl shadow-sm border mb-4">
-            <h2 className="font-bold text-sm mb-3 flex gap-2"><MapPin size={16}/> Entrega</h2>
-            <div className="flex gap-2 bg-gray-100 p-1 rounded-lg mb-4">
-                <button onClick={() => setDeliveryMethod('delivery')} className={`flex-1 py-2 text-sm font-bold rounded-md ${deliveryMethod === 'delivery' ? 'bg-white shadow text-pink-600' : 'text-gray-500'}`}>Entrega</button>
-                <button onClick={() => setDeliveryMethod('pickup')} className={`flex-1 py-2 text-sm font-bold rounded-md ${deliveryMethod === 'pickup' ? 'bg-white shadow text-pink-600' : 'text-gray-500'}`}>Retirar</button>
+      {/* Avisos de Estoque */}
+      {stockWarnings.length > 0 && (
+          <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4 rounded-r">
+              <div className="flex items-center gap-2 mb-2"><AlertTriangle className="text-yellow-600" size={20}/><span className="font-bold text-yellow-700">Atenção ao Estoque</span></div>
+              <ul className="list-disc pl-5 text-sm text-yellow-700 space-y-1">{stockWarnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+          </div>
+      )}
+
+      {/* --- LISTA DE ITENS (AQUI ESTÁ ELA) --- */}
+      <div className="space-y-3 mb-6">
+        {items.map(item => (
+            <div key={item.cartId} className="bg-white p-3 rounded-xl border flex justify-between items-center shadow-sm">
+                <div className="flex-1"><p className="font-bold text-sm text-gray-800">{item.name}</p><p className="text-xs text-green-600 font-bold">Unit: R$ {item.price.toFixed(2)}</p></div>
+                <div className="flex items-center gap-3 mr-4 bg-gray-50 rounded-lg p-1"><button onClick={() => updateQuantity(item.cartId, item.quantity - 1)} className="w-6 h-6 flex items-center justify-center bg-white shadow rounded hover:bg-gray-200 text-gray-600 font-bold" disabled={item.quantity <= 1}><Minus size={14}/></button><span className="text-sm font-bold w-4 text-center">{item.quantity}</span><button onClick={() => updateQuantity(item.cartId, item.quantity + 1)} className="w-6 h-6 flex items-center justify-center bg-white shadow rounded hover:bg-gray-200 text-green-600 font-bold"><Plus size={14}/></button></div>
+                <div className="text-right mr-4 font-bold text-sm">R$ {(item.price * item.quantity).toFixed(2)}</div>
+                <button onClick={() => removeFromCart(item.cartId)} className="text-red-400 p-2 hover:bg-red-50 rounded-full transition"><Trash2 size={18}/></button>
             </div>
+        ))}
+      </div>
 
+      {/* Telefone Obrigatório */}
+      {user && !profile?.phone && (
+          <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl mb-4 animate-in slide-in-from-left">
+              <label className="text-sm font-bold text-orange-800 flex items-center gap-2 mb-2"><Phone size={16}/> WhatsApp para Contato (Obrigatório)</label>
+              <input className="w-full p-3 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none" placeholder="(00) 00000-0000" value={missingPhone} onChange={e => setMissingPhone(e.target.value)}/>
+          </div>
+      )}
+
+      {/* Entrega e Endereço */}
+      {paymentMethod !== 'conta_aberta' && (
+          <div className="bg-white p-4 rounded-xl shadow-sm border space-y-4 mb-4">
+            <h2 className="font-bold text-sm flex gap-2 items-center"><MapPin size={16} className="text-pink-600"/> Entrega</h2>
+            <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
+                <button onClick={() => setDeliveryMethod('delivery')} className={`flex-1 py-2 text-sm font-bold rounded-md transition-all ${deliveryMethod === 'delivery' ? 'bg-white text-pink-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Entrega</button>
+                <button onClick={() => setDeliveryMethod('pickup')} className={`flex-1 py-2 text-sm font-bold rounded-md transition-all ${deliveryMethod === 'pickup' ? 'bg-white text-pink-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Retirar</button>
+            </div>
+            
             {deliveryMethod === 'delivery' && (
-                <div>
-                    {savedAddresses.map(addr => (
-                        <div key={addr.id} onClick={() => setSelectedAddressId(addr.id)} className={`p-3 border rounded-xl mb-2 cursor-pointer flex justify-between items-center ${selectedAddressId === addr.id ? 'border-pink-500 bg-pink-50' : 'border-gray-200'}`}>
-                            <div>
-                                <span className="text-xs font-bold bg-white border px-2 py-0.5 rounded text-gray-500 uppercase">{addr.nickname}</span>
-                                <p className="font-bold text-sm mt-1">{addr.street}, {addr.number}</p>
-                                <p className="text-xs text-gray-500">{addr.district} ({addr.regionType === 'plano_diretor' ? 'Plano Diretor' : addr.sectorName})</p>
-                            </div>
-                            {selectedAddressId === addr.id && <CheckCircle size={18} className="text-pink-600"/>}
+                <div className="space-y-3 animate-in fade-in">
+                    {savedAddresses.length > 0 ? (
+                        <div className="space-y-2 mb-4">
+                            <p className="text-xs font-bold text-gray-500 uppercase">Selecione:</p>
+                            {savedAddresses.map(addr => (
+                                <div key={addr.id} onClick={() => setSelectedAddressId(addr.id)} className={`p-3 rounded-xl border cursor-pointer flex justify-between items-center ${selectedAddressId === addr.id ? 'border-green-500 bg-green-50' : 'border-gray-200'}`}>
+                                    <div><p className="font-bold text-sm">{addr.nickname}</p><p className="text-xs text-gray-500 line-clamp-1">{addr.street}, {addr.number} ({addr.regionType === 'plano_diretor' ? 'Plano Diretor' : addr.sectorName})</p></div>
+                                    {selectedAddressId === addr.id && <CheckCircle size={18} className="text-green-600"/>}
+                                </div>
+                            ))}
                         </div>
-                    ))}
+                    ) : null}
                     <button onClick={() => setIsAddrModalOpen(true)} className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 font-bold flex items-center justify-center gap-2 hover:bg-gray-50">+ Novo Endereço</button>
                 </div>
             )}
+          </div>
+      )}
+
+      {/* Pagamento (Dinamico com StoreSettings) */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border mb-24">
+        <h2 className="font-bold text-sm mb-3 flex items-center gap-2"><CreditCard size={16}/> Forma de Pagamento</h2>
+        
+        <div className="grid grid-cols-2 gap-2">
+            {storeSettings?.paymentMethods.pix.active && (
+                <button onClick={() => setPaymentMethod('pix')} className={`py-3 px-2 border rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'pix' ? 'bg-emerald-50 border-emerald-500 text-emerald-700 ring-1 ring-emerald-500' : 'bg-white text-gray-600 border-gray-200'}`}>
+                    <QrCode size={18}/> PIX
+                </button>
+            )}
+            {storeSettings?.paymentMethods.money.active && (
+                <button onClick={() => setPaymentMethod('money')} className={`py-3 px-2 border rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'money' ? 'bg-green-50 border-green-600 text-green-800 ring-1 ring-green-600' : 'bg-white text-gray-600 border-gray-200'}`}>
+                    <Banknote size={18}/> Dinheiro
+                </button>
+            )}
+            {storeSettings?.paymentMethods.link_debit.active && (
+                <button onClick={() => setPaymentMethod('link_debito')} className={`py-3 px-2 border rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'link_debito' ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500' : 'bg-white text-gray-600 border-gray-200'}`}>
+                    <LinkIcon size={18}/> Link Débito
+                </button>
+            )}
+            {storeSettings?.paymentMethods.link_credit.active && (
+                <button onClick={() => setPaymentMethod('link_credito')} className={`py-3 px-2 border rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'link_credito' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 ring-1 ring-indigo-500' : 'bg-white text-gray-600 border-gray-200'}`}>
+                    <LinkIcon size={18}/> Link Crédito
+                </button>
+            )}
         </div>
 
-        {/* Itens e Pagamento (Igual ao anterior) */}
-        {/* ... (Renderização dos itens e botões de pagamento usando storeSettings) ... */}
-        
-        {/* MODAL NOVO ENDEREÇO ATUALIZADO */}
-        {isAddrModalOpen && (
+        {paymentMethod === 'pix' && (
+            <div className="mt-3 p-3 bg-emerald-50 rounded-lg border border-emerald-100 flex items-center justify-between">
+                <div className="text-xs text-emerald-800"><p className="font-bold">Pagar com PIX</p><p>Gere o código agora.</p></div>
+                <button onClick={handleOpenPix} className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm hover:bg-emerald-700">Gerar QR Code</button>
+            </div>
+        )}
+
+        {isMonthlyOrReseller && storeSettings?.paymentMethods.monthly.active && (
+            <button onClick={() => setPaymentMethod('conta_aberta')} className={`w-full mt-2 py-3 border-2 border-dashed rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'conta_aberta' ? 'bg-purple-100 border-purple-500 text-purple-700' : 'border-purple-200 text-purple-600'}`}>
+                <FileText size={18}/> Pagar na Conta / Boleta
+            </button>
+        )}
+      </div>
+
+      {/* Footer Total (Fixo) */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 shadow-lg safe-area-bottom z-40">
+        <div className="max-w-2xl mx-auto space-y-3">
+             <div className="flex justify-between font-bold text-lg text-gray-800"><span>Total</span><span className="text-green-600">R$ {(cartTotal + shippingPrice).toFixed(2)}</span></div>
+             <div className="flex justify-between text-xs text-gray-500"><span>Frete: {deliveryMethod === 'pickup' ? 'Grátis' : `R$ ${shippingPrice.toFixed(2)}`}</span></div>
+            <button onClick={handleCheckout} disabled={isSubmitting} className="w-full bg-green-600 text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-700 shadow-lg">
+                {isSubmitting ? <Loader2 className="animate-spin"/> : <><Send size={18}/> {paymentMethod === 'conta_aberta' ? 'Confirmar na Conta' : 'Enviar Pedido'}</>}
+            </button>
+        </div>
+      </div>
+
+      {/* MODAL NOVO ENDEREÇO (INTEGRADO) */}
+      {isAddrModalOpen && (
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4">
                 <div className="bg-white w-full max-w-md rounded-2xl p-6 h-[85vh] sm:h-auto overflow-y-auto animate-in slide-in-from-bottom">
                     <h2 className="font-bold text-lg mb-4">Novo Endereço</h2>
@@ -253,8 +494,27 @@ export default function CartPage() {
                 </div>
             </div>
         )}
-        
-        {/* Modal PIX e Footer (Mantidos) */}
+
+      {/* Modal PIX */}
+      {showPixModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl p-6 relative animate-in zoom-in-95 duration-300">
+                  <button onClick={() => setShowPixModal(false)} className="absolute top-4 right-4 text-stone-400 hover:text-stone-600 p-2 rounded-full hover:bg-stone-100"><X size={20}/></button>
+                  <div className="text-center mb-6">
+                      <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3"><QrCode size={24}/></div>
+                      <h3 className="text-xl font-bold text-stone-800">Pagamento PIX</h3>
+                      <p className="text-sm text-stone-500">Valor Total: <strong className="text-emerald-600">R$ {(cartTotal + shippingPrice).toFixed(2)}</strong></p>
+                  </div>
+                  <div className="flex justify-center mb-6 p-4 bg-white border-2 border-stone-100 rounded-2xl shadow-inner">
+                      <QRCodeSVG value={pixCode} size={200} />
+                  </div>
+                  <button onClick={handleCopyPix} className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${pixCopied ? 'bg-green-600 text-white' : 'bg-stone-900 text-white hover:bg-stone-800'}`}>
+                      {pixCopied ? <CheckCircle size={18}/> : <Copy size={18}/>}
+                      {pixCopied ? "Código Copiado!" : "Copiar Código PIX"}
+                  </button>
+              </div>
+          </div>
+      )}
     </div>
   );
 }
