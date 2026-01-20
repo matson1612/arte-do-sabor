@@ -4,23 +4,33 @@
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { Trash2, ArrowLeft, Send, MapPin, Search, Loader2, ShoppingBag, CreditCard, FileText, CheckCircle, Plus, Minus, AlertTriangle, Phone, QrCode, Copy, X, Link as LinkIcon, Banknote, Save } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
 import { db } from "@/lib/firebase";
-import { doc, getDoc, collection, serverTimestamp, runTransaction, updateDoc } from "firebase/firestore";
+import { doc, getDoc, addDoc, collection, serverTimestamp, runTransaction, updateDoc } from "firebase/firestore";
 import Link from "next/link";
 import { generateShortId } from "@/utils/generateId"; 
 import { Option, StoreSettings, UserAddress } from "@/types";
 import { QRCodeSVG } from "qrcode.react"; 
 import { generatePixCopyPaste } from "@/utils/pix";
 
+// ⚠️ Mantenha sua chave aqui
 const GOOGLE_MAPS_API_KEY = "AIzaSyBy365txh8nJ9JuGfvyPGdW5-angEXWBj8"; 
 const DEFAULT_CENTER = { lat: -10.183760, lng: -48.333650 }; 
+
+// CORREÇÃO: Definir as bibliotecas fora do componente para evitar recarregamento
+const LIBRARIES: "geometry"[] = ["geometry"];
 
 export default function CartPage() {
   const { items, removeFromCart, updateQuantity, clearCart, cartTotal } = useCart();
   const { user, loginGoogle, profile } = useAuth();
-  const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_MAPS_API_KEY });
+  
+  // CORREÇÃO: Adicionado 'libraries' aqui
+  const { isLoaded } = useJsApiLoader({ 
+    id: 'google-map-script', 
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
+    libraries: LIBRARIES 
+  });
   
   // Estados de Dados
   const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
@@ -68,7 +78,7 @@ export default function CartPage() {
     });
   }, [user]);
 
-  // 3. Validação de Estoque (Sempre roda ao abrir o carrinho)
+  // 3. Validação de Estoque
   useEffect(() => {
     if (items.length === 0) return;
     const validate = async () => {
@@ -97,7 +107,7 @@ export default function CartPage() {
   // 4. Cálculo de Frete
   useEffect(() => {
     if (deliveryMethod === 'pickup') { setShippingPrice(0); return; }
-    if (!storeSettings || !selectedAddressId) return;
+    if (!storeSettings || !selectedAddressId || !isLoaded) return; // Espera o Google Maps carregar
 
     const addr = savedAddresses.find(a => a.id === selectedAddressId);
     if (!addr) return;
@@ -105,9 +115,11 @@ export default function CartPage() {
     let price = 0;
 
     // Plano Diretor (Distância)
-    if (addr.regionType === 'plano_diretor' && addr.location && storeSettings.location && window.google) {
+    if (addr.regionType === 'plano_diretor' && addr.location && storeSettings.location && window.google && window.google.maps.geometry) {
         const from = new window.google.maps.LatLng(storeSettings.location.lat, storeSettings.location.lng);
         const to = new window.google.maps.LatLng(addr.location.lat, addr.location.lng);
+        
+        // AQUI OCORRIA O ERRO SE A LIB 'GEOMETRY' NÃO ESTIVESSE CARREGADA
         const distKm = window.google.maps.geometry.spherical.computeDistanceBetween(from, to) / 1000;
 
         const rule = storeSettings.shipping.distanceTable.find(r => distKm >= r.minKm && distKm <= r.maxKm);
@@ -122,11 +134,14 @@ export default function CartPage() {
         const area = storeSettings.shipping.fixedAreas.find(a => a.name === addr.sectorName);
         if (area) {
             if (area.type === 'fixed') price = area.price;
-            else if (area.type === 'km_plus_tax' && addr.location && storeSettings.location && window.google) {
+            else if (area.type === 'km_plus_tax' && addr.location && storeSettings.location && window.google && window.google.maps.geometry) {
                 const from = new window.google.maps.LatLng(storeSettings.location.lat, storeSettings.location.lng);
                 const to = new window.google.maps.LatLng(addr.location.lat, addr.location.lng);
                 const distKm = window.google.maps.geometry.spherical.computeDistanceBetween(from, to) / 1000;
-                price = (distKm * 2) + (area.tax || 0); // R$2 base + Taxa
+                
+                // R$ 2,00 por Km (base) + Taxa fixa
+                const baseKmPrice = 2; 
+                price = (distKm * baseKmPrice) + (area.tax || 0);
             }
         }
     }
@@ -136,7 +151,7 @@ export default function CartPage() {
     }
 
     setShippingPrice(price);
-  }, [deliveryMethod, selectedAddressId, storeSettings, savedAddresses, cartTotal]);
+  }, [deliveryMethod, selectedAddressId, storeSettings, savedAddresses, cartTotal, isLoaded]);
 
   // --- Funções Auxiliares ---
   const handleOpenPix = () => {
@@ -194,7 +209,6 @@ export default function CartPage() {
         if (!profile?.phone && missingPhone) await updateDoc(doc(db, "users", user.uid), { phone: missingPhone });
 
         await runTransaction(db, async (transaction) => {
-            // Lógica de Estoque (Transação Atômica)
             const productDecrements = new Map<string, number>();
             const groupOptionDecrements = new Map<string, Map<string, number>>();
             const addProdDec = (id: string, qty: number) => { const current = productDecrements.get(id) || 0; productDecrements.set(id, current + qty); };
@@ -270,7 +284,6 @@ export default function CartPage() {
     <div className="pb-40 pt-4 px-4 max-w-2xl mx-auto">
         <h1 className="font-bold text-xl mb-6">Finalizar Pedido</h1>
 
-        {/* --- 1. AVISOS --- */}
         {stockWarnings.length > 0 && (
             <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4 rounded-r">
                 <div className="flex items-center gap-2 mb-2"><AlertTriangle className="text-yellow-600" size={20}/><span className="font-bold text-yellow-700">Atenção</span></div>
@@ -278,14 +291,10 @@ export default function CartPage() {
             </div>
         )}
 
-        {/* --- 2. LISTA DE PRODUTOS --- */}
         <div className="space-y-3 mb-6">
             {items.map(item => (
                 <div key={item.cartId} className="bg-white p-3 rounded-xl border flex justify-between items-center shadow-sm">
-                    <div className="flex-1">
-                        <p className="font-bold text-sm text-gray-800">{item.name}</p>
-                        <p className="text-xs text-green-600 font-bold">Unit: R$ {item.price.toFixed(2)}</p>
-                    </div>
+                    <div className="flex-1"><p className="font-bold text-sm text-gray-800">{item.name}</p><p className="text-xs text-green-600 font-bold">Unit: R$ {item.price.toFixed(2)}</p></div>
                     <div className="flex items-center gap-3 mr-4 bg-gray-50 rounded-lg p-1">
                         <button onClick={() => updateQuantity(item.cartId, item.quantity - 1)} className="w-6 h-6 flex items-center justify-center bg-white shadow rounded hover:bg-gray-200 text-gray-600 font-bold" disabled={item.quantity <= 1}><Minus size={14}/></button>
                         <span className="text-sm font-bold w-4 text-center">{item.quantity}</span>
@@ -297,7 +306,6 @@ export default function CartPage() {
             ))}
         </div>
 
-        {/* --- 3. TELEFONE --- */}
         {user && !profile?.phone && (
             <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl mb-4">
                 <label className="text-sm font-bold text-orange-800 flex items-center gap-2 mb-2"><Phone size={16}/> WhatsApp (Obrigatório)</label>
@@ -305,7 +313,6 @@ export default function CartPage() {
             </div>
         )}
 
-        {/* --- 4. ENTREGA --- */}
         {paymentMethod !== 'conta_aberta' && (
             <div className="bg-white p-4 rounded-xl shadow-sm border space-y-4 mb-4">
                 <h2 className="font-bold text-sm flex gap-2 items-center"><MapPin size={16} className="text-pink-600"/> Entrega</h2>
@@ -315,80 +322,53 @@ export default function CartPage() {
                 </div>
                 {deliveryMethod === 'delivery' && (
                     <div className="space-y-3 animate-in fade-in">
-                        {savedAddresses.map(addr => (
-                            <div key={addr.id} onClick={() => setSelectedAddressId(addr.id)} className={`p-3 border rounded-xl cursor-pointer flex justify-between items-center ${selectedAddressId === addr.id ? 'border-pink-500 bg-pink-50' : 'border-gray-200'}`}>
-                                <div>
-                                    <span className="text-xs font-bold bg-white border px-2 py-0.5 rounded text-gray-500 uppercase">{addr.nickname}</span>
-                                    <p className="font-bold text-sm mt-1">{addr.street}, {addr.number}</p>
-                                    <p className="text-xs text-gray-500">{addr.district} ({addr.regionType === 'plano_diretor' ? 'Plano Diretor' : addr.sectorName})</p>
-                                </div>
-                                {selectedAddressId === addr.id && <CheckCircle size={18} className="text-pink-600"/>}
+                        {savedAddresses.length > 0 ? (
+                            <div className="space-y-2 mb-4">
+                                <p className="text-xs font-bold text-gray-500 uppercase">Selecione:</p>
+                                {savedAddresses.map(addr => (
+                                    <div key={addr.id} onClick={() => setSelectedAddressId(addr.id)} className={`p-3 border rounded-xl cursor-pointer flex justify-between items-center ${selectedAddressId === addr.id ? 'border-pink-500 bg-pink-50' : 'border-gray-200'}`}>
+                                        <div><span className="text-xs font-bold bg-white border px-2 py-0.5 rounded text-gray-500 uppercase">{addr.nickname}</span><p className="font-bold text-sm mt-1">{addr.street}, {addr.number}</p><p className="text-xs text-gray-500">{addr.district} ({addr.regionType === 'plano_diretor' ? 'Plano Diretor' : addr.sectorName})</p></div>
+                                        {selectedAddressId === addr.id && <CheckCircle size={18} className="text-pink-600"/>}
+                                    </div>
+                                ))}
                             </div>
-                        ))}
+                        ) : null}
                         <button onClick={() => setIsAddrModalOpen(true)} className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 font-bold flex items-center justify-center gap-2 hover:bg-gray-50">+ Novo Endereço</button>
                     </div>
                 )}
             </div>
         )}
 
-        {/* --- 5. PAGAMENTO --- */}
         <div className="bg-white p-4 rounded-xl shadow-sm border mb-24">
             <h2 className="font-bold text-sm mb-3 flex items-center gap-2"><CreditCard size={16}/> Forma de Pagamento</h2>
             <div className="grid grid-cols-2 gap-2">
-                {/* RENDERIZAÇÃO DINÂMICA DAS OPÇÕES */}
-                {storeSettings?.paymentMethods.pix.active && (
-                    <button onClick={() => setPaymentMethod('pix')} className={`py-3 px-2 border rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'pix' ? 'bg-emerald-50 border-emerald-500 text-emerald-700 ring-1 ring-emerald-500' : 'bg-white text-gray-600 border-gray-200'}`}><QrCode size={18}/> PIX</button>
-                )}
-                {storeSettings?.paymentMethods.money.active && (
-                    <button onClick={() => setPaymentMethod('money')} className={`py-3 px-2 border rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'money' ? 'bg-green-50 border-green-600 text-green-800 ring-1 ring-green-600' : 'bg-white text-gray-600 border-gray-200'}`}><Banknote size={18}/> Dinheiro</button>
-                )}
-                {storeSettings?.paymentMethods.link_debit.active && (
-                    <button onClick={() => setPaymentMethod('link_debit')} className={`py-3 px-2 border rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'link_debit' ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500' : 'bg-white text-gray-600 border-gray-200'}`}><LinkIcon size={18}/> Débito</button>
-                )}
-                {storeSettings?.paymentMethods.link_credit.active && (
-                    <button onClick={() => setPaymentMethod('link_credit')} className={`py-3 px-2 border rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'link_credit' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 ring-1 ring-indigo-500' : 'bg-white text-gray-600 border-gray-200'}`}><LinkIcon size={18}/> Crédito</button>
-                )}
+                {storeSettings?.paymentMethods.pix.active && (<button onClick={() => setPaymentMethod('pix')} className={`py-3 px-2 border rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'pix' ? 'bg-emerald-50 border-emerald-500 text-emerald-700 ring-1 ring-emerald-500' : 'bg-white text-gray-600 border-gray-200'}`}><QrCode size={18}/> PIX</button>)}
+                {storeSettings?.paymentMethods.money.active && (<button onClick={() => setPaymentMethod('money')} className={`py-3 px-2 border rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'money' ? 'bg-green-50 border-green-600 text-green-800 ring-1 ring-green-600' : 'bg-white text-gray-600 border-gray-200'}`}><Banknote size={18}/> Dinheiro</button>)}
+                {storeSettings?.paymentMethods.link_debit.active && (<button onClick={() => setPaymentMethod('link_debit')} className={`py-3 px-2 border rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'link_debit' ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500' : 'bg-white text-gray-600 border-gray-200'}`}><LinkIcon size={18}/> Débito</button>)}
+                {storeSettings?.paymentMethods.link_credit.active && (<button onClick={() => setPaymentMethod('link_credit')} className={`py-3 px-2 border rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'link_credit' ? 'bg-indigo-50 border-indigo-500 text-indigo-700 ring-1 ring-indigo-500' : 'bg-white text-gray-600 border-gray-200'}`}><LinkIcon size={18}/> Crédito</button>)}
             </div>
-
-            {/* Opção para Mensalistas/Revendedores (Boleta) */}
-            {isMonthlyOrReseller && storeSettings?.paymentMethods.monthly.active && (
-                <button onClick={() => setPaymentMethod('conta_aberta')} className={`w-full mt-2 py-3 border-2 border-dashed rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'conta_aberta' ? 'bg-purple-100 border-purple-500 text-purple-700' : 'border-purple-200 text-purple-600'}`}>
-                    <FileText size={18}/> Pagar na Conta / Boleta
-                </button>
-            )}
-
-            {paymentMethod === 'pix' && (
-                <div className="mt-3 p-3 bg-emerald-50 rounded-lg border border-emerald-100 flex items-center justify-between">
-                    <div className="text-xs text-emerald-800"><p className="font-bold">Pagar com PIX</p><p>Gere o código agora.</p></div>
-                    <button onClick={handleOpenPix} className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm hover:bg-emerald-700">Gerar QR Code</button>
-                </div>
-            )}
+            {isMonthlyOrReseller && storeSettings?.paymentMethods.monthly.active && (<button onClick={() => setPaymentMethod('conta_aberta')} className={`w-full mt-2 py-3 border-2 border-dashed rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${paymentMethod === 'conta_aberta' ? 'bg-purple-100 border-purple-500 text-purple-700' : 'border-purple-200 text-purple-600'}`}><FileText size={18}/> Pagar na Conta / Boleta</button>)}
+            {paymentMethod === 'pix' && (<div className="mt-3 p-3 bg-emerald-50 rounded-lg border border-emerald-100 flex items-center justify-between"><div className="text-xs text-emerald-800"><p className="font-bold">Pagar com PIX</p><p>Gere o código agora.</p></div><button onClick={handleOpenPix} className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm hover:bg-emerald-700">Gerar QR Code</button></div>)}
         </div>
 
-        {/* --- 6. FOOTER TOTAL --- */}
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 shadow-lg safe-area-bottom z-40">
             <div className="max-w-2xl mx-auto space-y-3">
                 <div className="flex justify-between font-bold text-lg text-gray-800"><span>Total</span><span className="text-green-600">R$ {(cartTotal + shippingPrice).toFixed(2)}</span></div>
                 <div className="flex justify-between text-xs text-gray-500"><span>Frete: {deliveryMethod === 'pickup' ? 'Grátis' : `R$ ${shippingPrice.toFixed(2)}`}</span></div>
-                <button onClick={handleCheckout} disabled={isSubmitting} className="w-full bg-green-600 text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-700 shadow-lg">
-                    {isSubmitting ? <Loader2 className="animate-spin"/> : <><Send size={18}/> {paymentMethod === 'conta_aberta' ? 'Confirmar na Conta' : 'Enviar Pedido'}</>}
-                </button>
+                <button onClick={handleCheckout} disabled={isSubmitting} className="w-full bg-green-600 text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-700 shadow-lg">{isSubmitting ? <Loader2 className="animate-spin"/> : <><Send size={18}/> {paymentMethod === 'conta_aberta' ? 'Confirmar na Conta' : 'Enviar Pedido'}</>}</button>
             </div>
         </div>
 
-        {/* MODAL NOVO ENDEREÇO (Igual ao fornecido anteriormente) */}
         {isAddrModalOpen && (
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4">
                 <div className="bg-white w-full max-w-md rounded-2xl p-6 h-[85vh] sm:h-auto overflow-y-auto animate-in slide-in-from-bottom">
                     <h2 className="font-bold text-lg mb-4">Novo Endereço</h2>
                     <div className="space-y-4">
                         <div><label className="text-xs font-bold text-gray-500 uppercase">Salvar como</label><input className="w-full p-2 border rounded" placeholder="Ex: Casa, Trabalho" value={newAddr.nickname} onChange={e => setNewAddr({...newAddr, nickname: e.target.value})} /></div>
-                        
                         <div className="flex bg-gray-100 p-1 rounded-lg">
                             <button onClick={() => setNewAddr({...newAddr, regionType: 'plano_diretor', sectorName: undefined})} className={`flex-1 py-2 text-xs font-bold rounded ${newAddr.regionType === 'plano_diretor' ? 'bg-white shadow text-slate-800' : 'text-gray-500'}`}>Plano Diretor</button>
                             <button onClick={() => setNewAddr({...newAddr, regionType: 'outras_localidades'})} className={`flex-1 py-2 text-xs font-bold rounded ${newAddr.regionType === 'outras_localidades' ? 'bg-white shadow text-slate-800' : 'text-gray-500'}`}>Outras Regiões</button>
                         </div>
-
                         {newAddr.regionType === 'plano_diretor' ? (
                             <div className="flex gap-2"><input className="w-full p-2 border rounded" placeholder="CEP (Busca Auto)" value={newAddr.cep} onChange={e => setNewAddr({...newAddr, cep: e.target.value})} maxLength={9}/><button onClick={handleBuscaCep} className="bg-slate-800 text-white px-3 rounded"><Search size={18}/></button></div>
                         ) : (
@@ -396,42 +376,32 @@ export default function CartPage() {
                                 <label className="text-xs font-bold text-gray-500 uppercase">Selecione o Setor</label>
                                 <select className="w-full p-2 border rounded bg-white" value={newAddr.sectorName || ''} onChange={e => setNewAddr({...newAddr, sectorName: e.target.value})}>
                                     <option value="">-- Selecione --</option>
-                                    {storeSettings?.shipping.fixedAreas.map(area => (
-                                        <option key={area.id} value={area.name}>{area.name} (+R$ {area.price})</option>
-                                    ))}
+                                    {storeSettings?.shipping.fixedAreas.map(area => (<option key={area.id} value={area.name}>{area.name} (+R$ {area.price})</option>))}
                                 </select>
                             </div>
                         )}
-
                         <div><input className="w-full p-2 border rounded bg-gray-50" placeholder="Rua / Quadra" value={newAddr.street} onChange={e => setNewAddr({...newAddr, street: e.target.value})} /></div>
                         <div className="flex gap-2"><input className="w-24 p-2 border rounded" placeholder="Nº" value={newAddr.number} onChange={e => setNewAddr({...newAddr, number: e.target.value})} /><input className="flex-1 p-2 border rounded" placeholder="Complemento" value={newAddr.complement} onChange={e => setNewAddr({...newAddr, complement: e.target.value})} /></div>
-
                         <div className="h-40 rounded-lg overflow-hidden border relative bg-gray-100">
                             {isLoaded && <GoogleMap mapContainerStyle={{width:'100%',height:'100%'}} center={addrMapLoc} zoom={16}><Marker position={addrMapLoc} draggable onDragEnd={(e) => e.latLng && setAddrMapLoc({lat: e.latLng.lat(), lng: e.latLng.lng()})}/></GoogleMap>}
                             <div className="absolute bottom-1 left-0 w-full text-center"><span className="bg-white/80 text-[10px] px-2 rounded shadow">Confirme a localização no mapa</span></div>
                         </div>
-
                         <div className="flex gap-2 pt-2"><button onClick={() => setIsAddrModalOpen(false)} className="flex-1 py-3 border rounded-xl font-bold">Cancelar</button><button onClick={handleSaveAddress} className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-bold">Salvar Endereço</button></div>
                     </div>
                 </div>
             </div>
         )}
 
-        {/* Modal PIX (Igual) */}
-        {showPixModal && (
+      {showPixModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in">
               <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl p-6 relative animate-in zoom-in-95 duration-300">
                   <button onClick={() => setShowPixModal(false)} className="absolute top-4 right-4 text-stone-400 hover:text-stone-600 p-2 rounded-full hover:bg-stone-100"><X size={20}/></button>
-                  <div className="text-center mb-6">
-                      <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3"><QrCode size={24}/></div>
-                      <h3 className="text-xl font-bold text-stone-800">Pagamento PIX</h3>
-                      <p className="text-sm text-stone-500">Valor Total: <strong className="text-emerald-600">R$ {(cartTotal + shippingPrice).toFixed(2)}</strong></p>
-                  </div>
+                  <div className="text-center mb-6"><div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3"><QrCode size={24}/></div><h3 className="text-xl font-bold text-stone-800">Pagamento PIX</h3><p className="text-sm text-stone-500">Valor Total: <strong className="text-emerald-600">R$ {(cartTotal + shippingPrice).toFixed(2)}</strong></p></div>
                   <div className="flex justify-center mb-6 p-4 bg-white border-2 border-stone-100 rounded-2xl shadow-inner"><QRCodeSVG value={pixCode} size={200} /></div>
                   <button onClick={handleCopyPix} className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${pixCopied ? 'bg-green-600 text-white' : 'bg-stone-900 text-white hover:bg-stone-800'}`}>{pixCopied ? <CheckCircle size={18}/> : <Copy size={18}/>} {pixCopied ? "Código Copiado!" : "Copiar Código PIX"}</button>
               </div>
           </div>
-        )}
+      )}
     </div>
   );
 }
