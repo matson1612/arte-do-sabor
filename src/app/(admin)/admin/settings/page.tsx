@@ -4,7 +4,7 @@
 import { useState, useEffect, useRef } from "react";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
-import { Save, MapPin, Store, Phone, Loader2, Search, CreditCard, Truck, Key, Plus, Trash2 } from "lucide-react";
+import { Save, MapPin, Store, Phone, Loader2, Search, CreditCard, Truck, Key, Plus, Trash2, Copy, Check } from "lucide-react";
 import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
 import { StoreSettings, ShippingDistanceRule, ShippingFixedArea } from "@/types";
 
@@ -64,6 +64,7 @@ export default function AdminSettingsPage() {
   const [loading, setLoading] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<'info' | 'payment' | 'shipping'>('info');
+  const [copied, setCopied] = useState(false);
 
   const [settings, setSettings] = useState<StoreSettings>(DEFAULT_SETTINGS);
   const [cepInput, setCepInput] = useState("");
@@ -85,7 +86,6 @@ export default function AdminSettingsPage() {
               shipping: { 
                   ...prev.shipping, 
                   ...(data.shipping || {}),
-                  // Garante que se o banco estiver vazio, usa o default
                   distanceTable: data.shipping?.distanceTable || prev.shipping.distanceTable,
                   fixedAreas: data.shipping?.fixedAreas || prev.shipping.fixedAreas
               },
@@ -133,11 +133,18 @@ export default function AdminSettingsPage() {
     } catch (error) { alert("Erro ao salvar."); } finally { setLoading(false); }
   };
 
+  // Botão de Copiar Link
+  const copyLocationLink = () => {
+      const link = `https://www.google.com/maps/search/?api=1&query=${settings.location.lat},${settings.location.lng}`;
+      navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+  };
+
   const updatePayment = (key: keyof typeof settings.paymentMethods, field: string, value: any) => {
       setSettings(prev => ({ ...prev, paymentMethods: { ...prev.paymentMethods, [key]: { ...prev.paymentMethods[key], [field]: value } } }));
   };
 
-  // Funções de Frete
   const addDistRule = () => setSettings(p => ({...p, shipping: {...p.shipping, distanceTable: [...p.shipping.distanceTable, {minKm:0, maxKm:0, price:0}]}}));
   const removeDistRule = (i: number) => setSettings(p => ({...p, shipping: {...p.shipping, distanceTable: p.shipping.distanceTable.filter((_, idx) => idx !== i)}}));
   const updateDistRule = (i: number, f: keyof ShippingDistanceRule, v: number) => {
@@ -185,10 +192,28 @@ export default function AdminSettingsPage() {
                     <div className="flex gap-2"><input className="w-32 p-2 border rounded" placeholder="Nº" value={settings.address.number} onChange={e => setSettings({...settings, address: {...settings.address, number: e.target.value}})} /><input className="w-full p-2 border rounded bg-gray-50" value={settings.address.district} readOnly /></div>
                 </div>
             </div>
+            
             <div className="bg-white p-6 rounded-xl shadow-sm border h-fit">
-                <h2 className="font-bold text-lg text-gray-700 mb-4">Localização (Google Maps)</h2>
-                <div className="h-[350px] rounded-xl overflow-hidden relative border">{isLoaded && <GoogleMap mapContainerStyle={mapContainerStyle} center={settings.location} zoom={16} onLoad={map => { mapRef.current = map; }}><Marker position={settings.location} draggable onDragEnd={(e) => e.latLng && setSettings({...settings, location: {lat: e.latLng.lat(), lng: e.latLng.lng()}})}/></GoogleMap>}</div>
-                <p className="text-xs text-gray-400 mt-2 text-center">Arraste o pino para definir a origem do cálculo de frete.</p>
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="font-bold text-lg text-gray-700">Localização (Google Maps)</h2>
+                    <button 
+                        onClick={copyLocationLink} 
+                        className={`text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-2 border transition ${copied ? 'bg-green-50 text-green-700 border-green-200' : 'bg-white text-blue-600 border-blue-200 hover:bg-blue-50'}`}
+                    >
+                        {copied ? <Check size={14}/> : <Copy size={14}/>}
+                        {copied ? "Link Copiado" : "Copiar Link Maps"}
+                    </button>
+                </div>
+                
+                <div className="h-[350px] rounded-xl overflow-hidden relative border">
+                    {isLoaded && <GoogleMap mapContainerStyle={mapContainerStyle} center={settings.location} zoom={16} onLoad={map => { mapRef.current = map; }}>
+                        <Marker position={settings.location} draggable onDragEnd={(e) => e.latLng && setSettings({...settings, location: {lat: e.latLng.lat(), lng: e.latLng.lng()}})}/>
+                    </GoogleMap>}
+                </div>
+                <div className="mt-2 text-xs text-center text-gray-400 font-mono">
+                    Lat: {settings.location.lat.toFixed(6)}, Lng: {settings.location.lng.toFixed(6)}
+                </div>
+                <p className="text-xs text-gray-400 mt-2 text-center">Arraste o pino para definir a origem.</p>
             </div>
         </div>
       )}
@@ -211,7 +236,6 @@ export default function AdminSettingsPage() {
 
       {activeTab === 'shipping' && (
           <div className="space-y-8 animate-in fade-in">
-              {/* TABELA DE DISTÂNCIA (PLANO DIRETOR) */}
               <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
                   <div className="flex justify-between items-center mb-4">
                       <div><h2 className="font-bold text-lg text-slate-800">1. Plano Diretor (Por KM)</h2><p className="text-xs text-gray-500">Calculado via Google Maps.</p></div>
@@ -220,7 +244,6 @@ export default function AdminSettingsPage() {
                   <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-gray-50 text-gray-500 uppercase text-xs"><tr><th className="p-2">De (Km)</th><th className="p-2">Até (Km)</th><th className="p-2">Preço (R$)</th><th></th></tr></thead><tbody className="divide-y">{settings.shipping.distanceTable.map((r, i) => (<tr key={i}><td className="p-2"><input type="number" step="0.1" className="w-20 p-2 border rounded" value={r.minKm} onChange={e => updateDistRule(i, 'minKm', Number(e.target.value))}/></td><td className="p-2"><input type="number" step="0.1" className="w-20 p-2 border rounded" value={r.maxKm} onChange={e => updateDistRule(i, 'maxKm', Number(e.target.value))}/></td><td className="p-2"><input type="number" className="w-24 p-2 border rounded font-bold text-green-600" value={r.price} onChange={e => updateDistRule(i, 'price', Number(e.target.value))}/></td><td className="p-2"><button onClick={() => removeDistRule(i)} className="text-red-400"><Trash2 size={16}/></button></td></tr>))}</tbody></table></div>
               </div>
 
-              {/* SETORES FIXOS E ESPECIAIS */}
               <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
                   <div className="flex justify-between items-center mb-4">
                       <div><h2 className="font-bold text-lg text-slate-800">2. Outras Localidades</h2><p className="text-xs text-gray-500">Setores específicos selecionáveis pelo cliente.</p></div>
