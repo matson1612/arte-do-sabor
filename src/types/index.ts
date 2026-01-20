@@ -4,13 +4,26 @@ export type ClientType = 'standard' | 'monthly' | 'reseller';
 export type OrderStatus = 'em_aberto' | 'produzindo' | 'entrega' | 'finalizado' | 'cancelado';
 export type SalesChannel = 'delivery' | 'encomenda' | 'evento';
 
-export type ExpenseCategory = 'insumos' | 'embalagens' | 'contas_fixas' | 'pessoal' | 'marketing' | 'manutencao' | 'outros';
+// Categorias expandidas
+export type TransactionType = 'income' | 'expense';
+export type ExpenseCategory = 'insumos' | 'embalagens' | 'contas_fixas' | 'pessoal' | 'marketing' | 'manutencao' | 'venda_manual' | 'outros';
 
-// --- NOVA INTERFACE DE CATEGORIA ---
 export interface Category {
   id: string;
   name: string;
-  order: number; // Para definir a sequência no site
+  order: number;
+}
+
+// Interface unificada para lançamentos manuais (Receitas e Despesas)
+export interface FinancialRecord {
+  id: string;
+  description: string;
+  amount: number;
+  category: ExpenseCategory;
+  type: TransactionType; // 'income' ou 'expense'
+  date: any; 
+  createdAt: any;
+  clientId?: string; // Opcional: Vinculo com cliente
 }
 
 export interface Option {
@@ -38,22 +51,17 @@ export interface Product {
   description: string;
   basePrice: number;
   pricePostpaid?: number;
-  priceReseller?: number; // Preço Revenda
+  priceReseller?: number;
   imageUrl: string;
-  
-  category: string; // ID da Categoria
-  
+  category: string;
   isAvailable: boolean;
   availableStandard?: boolean;
   availablePostpaid?: boolean;
   availableReseller?: boolean;
-
   stock: number | null;
   complementGroupIds: string[];
-  
   price?: number; 
   fullGroups?: ComplementGroup[];
-  
   salesChannel?: SalesChannel;
   gallery?: string[];
   videoUrl?: string;
@@ -98,11 +106,21 @@ export interface Order {
   description?: string;
 }
 
-export interface Expense {
-  id: string;
-  description: string;
-  amount: number;
-  category: ExpenseCategory;
-  date: any; // Timestamp
-  createdAt: any;
+export interface StoreSettings {
+  id?: string; 
+  storeName: string;
+  cnpj: string;
+  phone: string;
+  address: {
+    street: string;
+    number: string;
+    district: string;
+    city: string;
+    state: string;
+  };
+  location: {
+    lat: number;
+    lng: number;
+  };
+  authorizedEmail: string;
 }
