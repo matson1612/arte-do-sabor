@@ -1,7 +1,7 @@
 // src/app/(shop)/profile/addresses/page.tsx
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
@@ -13,16 +13,20 @@ import { UserAddress, StoreSettings } from "@/types";
 // ⚠️ Mantenha sua chave aqui
 const GOOGLE_MAPS_API_KEY = "AIzaSyBy365txh8nJ9JuGfvyPGdW5-angEXWBj8"; 
 const DEFAULT_CENTER = { lat: -10.183760, lng: -48.333650 };
+const LIBRARIES: ("geometry")[] = ["geometry"];
 
 export default function AddressesPage() {
   const { user } = useAuth();
-  const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_MAPS_API_KEY });
+  const { isLoaded } = useJsApiLoader({ 
+    id: 'google-map-script', 
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY, 
+    libraries: LIBRARIES 
+  });
 
   const [loading, setLoading] = useState(true);
   const [addresses, setAddresses] = useState<UserAddress[]>([]);
   const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
 
-  // Estado do Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newAddr, setNewAddr] = useState<Partial<UserAddress>>({
       regionType: 'plano_diretor',
@@ -31,15 +35,12 @@ export default function AddressesPage() {
   const [addrMapLoc, setAddrMapLoc] = useState(DEFAULT_CENTER);
   const [saving, setSaving] = useState(false);
 
-  // Carregar Dados
   useEffect(() => {
     const init = async () => {
       try {
-        // 1. Configs da Loja (Para pegar os setores/bairros)
         const settingsSnap = await getDoc(doc(db, "store_settings", "config"));
         if (settingsSnap.exists()) setStoreSettings(settingsSnap.data() as StoreSettings);
 
-        // 2. Endereços do Usuário
         if (user) {
             const userSnap = await getDoc(doc(db, "users", user.uid));
             if (userSnap.exists() && userSnap.data().savedAddresses) {
@@ -52,7 +53,6 @@ export default function AddressesPage() {
     init();
   }, [user]);
 
-  // Funções do Modal (Igual ao Carrinho)
   const handleBuscaCep = async () => {
       if(!newAddr.cep || newAddr.cep.length < 8) return alert("CEP Inválido");
       try {
@@ -137,7 +137,7 @@ export default function AddressesPage() {
             </button>
         </div>
 
-        {/* MODAL PADRONIZADO (Igual ao Cart) */}
+        {/* MODAL PADRONIZADO */}
         {isModalOpen && (
             <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
                 <div className="bg-white w-full max-w-md rounded-2xl p-6 h-[85vh] sm:h-auto overflow-y-auto animate-in slide-in-from-bottom shadow-2xl relative">
