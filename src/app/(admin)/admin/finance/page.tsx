@@ -6,7 +6,7 @@ import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy, addDoc, serverTimestamp, deleteDoc, doc, where, updateDoc } from "firebase/firestore";
 import { 
   Loader2, TrendingUp, TrendingDown, DollarSign, Plus, Calendar, 
-  Trash2, ArrowUpRight, ArrowDownLeft, Filter, User, Pencil, X 
+  Trash2, ArrowUpRight, ArrowDownLeft, Filter, User, Pencil, X, Clock 
 } from "lucide-react";
 import { FinancialRecord, Order, ExpenseCategory, UserProfile } from "@/types";
 
@@ -24,11 +24,10 @@ const CATEGORIES: { id: ExpenseCategory; label: string; color: string }[] = [
 export default function FinancePage() {
   const [loading, setLoading] = useState(true);
   const [transactions, setTransactions] = useState<any[]>([]);
-  const [summary, setSummary] = useState({ income: 0, expense: 0, balance: 0 });
+  const [summary, setSummary] = useState({ income: 0, expense: 0, balance: 0, receivables: 0 });
   const [monthFilter, setMonthFilter] = useState(new Date().toISOString().slice(0, 7));
   const [users, setUsers] = useState<UserProfile[]>([]);
 
-  // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -60,7 +59,7 @@ export default function FinancePage() {
       const startDate = new Date(year, month - 1, 1);
       const endDate = new Date(year, month, 0, 23, 59, 59);
 
-      // 1. Buscar Pedidos (Receitas Automáticas)
+      // 1. Pedidos (Receitas Automáticas)
       const ordersQ = query(
           collection(db, "orders"), 
           where("createdAt", ">=", startDate),
@@ -77,7 +76,7 @@ export default function FinancePage() {
                 id: o.id,
                 type: 'income',
                 description: `Pedido #${o.shortId || o.id.slice(0,4)} - ${o.userName}`,
-                amount: Number(o.total) || 0, // Garante número
+                amount: Number(o.total) || 0,
                 date: o.createdAt?.seconds ? new Date(o.createdAt.seconds * 1000) : new Date(),
                 category: 'Vendas Sistema',
                 status: isRecebido ? 'recebido' : 'pendente',
@@ -85,7 +84,7 @@ export default function FinancePage() {
             };
         });
 
-      // 2. Buscar Lançamentos Manuais
+      // 2. Lançamentos Manuais
       const recordsSnap = await getDocs(query(collection(db, "expenses"), orderBy("date", "desc")));
       
       const manualRecords = recordsSnap.docs
@@ -94,7 +93,6 @@ export default function FinancePage() {
             return { id: d.id, ...data } as any;
         })
         .filter(e => {
-            // BLINDAGEM: Verifica se a data é válida string e se bate com o filtro
             if (!e.date || typeof e.date !== 'string') return false; 
             return e.date.startsWith(monthFilter);
         })
@@ -102,9 +100,9 @@ export default function FinancePage() {
             const client = users.find(u => u.uid === e.clientId);
             return {
                 id: e.id,
-                type: e.type || 'expense', // Se não tiver type (antigo), assume despesa
+                type: e.type || 'expense', 
                 description: e.description || "Sem descrição",
-                amount: Number(e.amount) || 0, // BLINDAGEM: Força virar número
+                amount: Number(e.amount) || 0,
                 date: new Date(e.date + 'T12:00:00'),
                 category: e.category || 'outros',
                 status: 'efetivado',
@@ -117,9 +115,15 @@ export default function FinancePage() {
       // 3. Unificar
       const all = [...orderIncomes, ...manualRecords].sort((a, b) => b.date.getTime() - a.date.getTime());
       
-      // Cálculo dos Totais (Somente soma o que é número válido)
+      // --- CÁLCULOS ---
+      // Recebido: Já pago
       const totalIncome = all
         .filter(t => t.type === 'income' && (t.status === 'recebido' || t.status === 'efetivado'))
+        .reduce((acc, curr) => acc + (curr.amount || 0), 0);
+      
+      // A Receber: Pendente
+      const totalReceivables = all
+        .filter(t => t.type === 'income' && t.status === 'pendente')
         .reduce((acc, curr) => acc + (curr.amount || 0), 0);
         
       const totalExpense = all
@@ -127,13 +131,12 @@ export default function FinancePage() {
         .reduce((acc, curr) => acc + (curr.amount || 0), 0);
       
       setTransactions(all);
-      setSummary({ income: totalIncome, expense: totalExpense, balance: totalIncome - totalExpense });
+      setSummary({ income: totalIncome, expense: totalExpense, balance: totalIncome - totalExpense, receivables: totalReceivables });
 
     } catch (e) { 
         console.error("Erro fatal no financeiro:", e); 
-        // Em caso de erro, zera para não quebrar a tela inteira
         setTransactions([]);
-        setSummary({ income: 0, expense: 0, balance: 0 });
+        setSummary({ income: 0, expense: 0, balance: 0, receivables: 0 });
     } 
     finally { setLoading(false); }
   };
@@ -165,7 +168,7 @@ export default function FinancePage() {
       try {
           const payload = {
               description: formData.description,
-              amount: parseFloat(formData.amount), // Garante salvar como número
+              amount: parseFloat(formData.amount),
               category: formData.category,
               type: formData.type,
               date: formData.date,
@@ -204,18 +207,26 @@ export default function FinancePage() {
         </div>
 
         {/* Cards Resumo */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-8">
             <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex items-center justify-between">
-                <div><p className="text-xs font-bold text-gray-400 uppercase mb-1">Entradas</p><h3 className="text-2xl font-bold text-emerald-600">R$ {summary.income.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h3></div>
-                <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center"><TrendingUp size={24}/></div>
+                <div><p className="text-xs font-bold text-gray-400 uppercase mb-1">Recebido</p><h3 className="text-xl font-bold text-emerald-600">R$ {summary.income.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h3></div>
+                <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center"><TrendingUp size={20}/></div>
             </div>
+            
+            {/* CARD A RECEBER (NOVO) */}
+            <div className="bg-white p-6 rounded-2xl border border-orange-100 shadow-sm flex items-center justify-between">
+                <div><p className="text-xs font-bold text-orange-400 uppercase mb-1">A Receber</p><h3 className="text-xl font-bold text-orange-600">R$ {summary.receivables.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h3></div>
+                <div className="w-10 h-10 rounded-full bg-orange-50 text-orange-500 flex items-center justify-center"><Clock size={20}/></div>
+            </div>
+
             <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex items-center justify-between">
-                <div><p className="text-xs font-bold text-gray-400 uppercase mb-1">Saídas</p><h3 className="text-2xl font-bold text-red-600">R$ {summary.expense.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h3></div>
-                <div className="w-12 h-12 rounded-full bg-red-50 text-red-600 flex items-center justify-center"><TrendingDown size={24}/></div>
+                <div><p className="text-xs font-bold text-gray-400 uppercase mb-1">Despesas</p><h3 className="text-xl font-bold text-red-600">R$ {summary.expense.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h3></div>
+                <div className="w-10 h-10 rounded-full bg-red-50 text-red-600 flex items-center justify-center"><TrendingDown size={20}/></div>
             </div>
+            
             <div className={`p-6 rounded-2xl border shadow-sm flex items-center justify-between ${summary.balance >= 0 ? 'bg-slate-800 text-white border-slate-700' : 'bg-red-50 text-red-800 border-red-200'}`}>
-                <div><p className={`text-xs font-bold uppercase mb-1 ${summary.balance >= 0 ? 'text-slate-400' : 'text-red-400'}`}>Saldo Líquido</p><h3 className="text-2xl font-bold">R$ {summary.balance.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h3></div>
-                <div className={`w-12 h-12 rounded-full flex items-center justify-center ${summary.balance >= 0 ? 'bg-slate-700 text-emerald-400' : 'bg-red-200 text-red-600'}`}><DollarSign size={24}/></div>
+                <div><p className={`text-xs font-bold uppercase mb-1 ${summary.balance >= 0 ? 'text-slate-400' : 'text-red-400'}`}>Saldo Líquido</p><h3 className="text-xl font-bold">R$ {summary.balance.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</h3></div>
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${summary.balance >= 0 ? 'bg-slate-700 text-emerald-400' : 'bg-red-200 text-red-600'}`}><DollarSign size={20}/></div>
             </div>
         </div>
 
@@ -253,7 +264,7 @@ export default function FinancePage() {
                                             <div className="flex items-center gap-2">
                                                 {isIncome ? <div className="bg-emerald-100 p-1 rounded text-emerald-600"><ArrowDownLeft size={14}/></div> : <div className="bg-red-100 p-1 rounded text-red-600"><ArrowUpRight size={14}/></div>}
                                                 {t.description}
-                                                {t.status === 'pendente' && <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded border border-yellow-200">A Receber</span>}
+                                                {t.status === 'pendente' && <span className="text-[9px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded border border-orange-200">A Receber</span>}
                                             </div>
                                         </td>
                                         <td className="p-4 text-gray-600 text-xs">
@@ -291,7 +302,6 @@ export default function FinancePage() {
                     </div>
                     
                     <div className="p-6 space-y-4">
-                        {/* Tipo de Transação */}
                         <div className="flex bg-gray-100 p-1 rounded-xl mb-2">
                             <button onClick={() => setFormData({...formData, type: 'expense', category: 'insumos'})} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${formData.type === 'expense' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500'}`}>Despesa (-)</button>
                             <button onClick={() => setFormData({...formData, type: 'income', category: 'venda_manual'})} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${formData.type === 'income' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-500'}`}>Receita (+)</button>
@@ -313,7 +323,6 @@ export default function FinancePage() {
                             </div>
                         </div>
 
-                        {/* Se for Receita: Opção de Vincular Cliente */}
                         {formData.type === 'income' && (
                             <div className="bg-purple-50 p-3 rounded-xl border border-purple-100">
                                 <label className="text-xs font-bold text-purple-700 uppercase block mb-1 flex items-center gap-1"><User size={12}/> Vincular Cliente (Opcional)</label>
