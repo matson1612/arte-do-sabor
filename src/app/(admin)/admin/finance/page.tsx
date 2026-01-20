@@ -77,29 +77,36 @@ export default function FinancePage() {
                 id: o.id,
                 type: 'income',
                 description: `Pedido #${o.shortId || o.id.slice(0,4)} - ${o.userName}`,
-                amount: o.total,
+                amount: Number(o.total) || 0, // Garante número
                 date: o.createdAt?.seconds ? new Date(o.createdAt.seconds * 1000) : new Date(),
                 category: 'Vendas Sistema',
                 status: isRecebido ? 'recebido' : 'pendente',
-                isSystem: true // Marca que veio do sistema de pedidos
+                isSystem: true
             };
         });
 
-      // 2. Buscar Lançamentos Manuais (Receitas e Despesas)
-      // Usamos a coleção 'expenses' que agora atua como 'ledger' (livro caixa)
+      // 2. Buscar Lançamentos Manuais
       const recordsSnap = await getDocs(query(collection(db, "expenses"), orderBy("date", "desc")));
+      
       const manualRecords = recordsSnap.docs
-        .map(d => ({ id: d.id, ...d.data() } as FinancialRecord))
-        .filter(e => e.date.startsWith(monthFilter))
+        .map(d => {
+            const data = d.data();
+            return { id: d.id, ...data } as any;
+        })
+        .filter(e => {
+            // BLINDAGEM: Verifica se a data é válida string e se bate com o filtro
+            if (!e.date || typeof e.date !== 'string') return false; 
+            return e.date.startsWith(monthFilter);
+        })
         .map(e => {
             const client = users.find(u => u.uid === e.clientId);
             return {
                 id: e.id,
-                type: e.type || 'expense', // Legado assume expense
-                description: e.description,
-                amount: Number(e.amount),
+                type: e.type || 'expense', // Se não tiver type (antigo), assume despesa
+                description: e.description || "Sem descrição",
+                amount: Number(e.amount) || 0, // BLINDAGEM: Força virar número
                 date: new Date(e.date + 'T12:00:00'),
-                category: e.category,
+                category: e.category || 'outros',
                 status: 'efetivado',
                 isSystem: false,
                 clientId: e.clientId,
@@ -110,13 +117,24 @@ export default function FinancePage() {
       // 3. Unificar
       const all = [...orderIncomes, ...manualRecords].sort((a, b) => b.date.getTime() - a.date.getTime());
       
-      const totalIncome = all.filter(t => t.type === 'income' && (t.status === 'recebido' || t.status === 'efetivado')).reduce((acc, curr) => acc + curr.amount, 0);
-      const totalExpense = all.filter(t => t.type === 'expense').reduce((acc, curr) => acc + curr.amount, 0);
+      // Cálculo dos Totais (Somente soma o que é número válido)
+      const totalIncome = all
+        .filter(t => t.type === 'income' && (t.status === 'recebido' || t.status === 'efetivado'))
+        .reduce((acc, curr) => acc + (curr.amount || 0), 0);
+        
+      const totalExpense = all
+        .filter(t => t.type === 'expense')
+        .reduce((acc, curr) => acc + (curr.amount || 0), 0);
       
       setTransactions(all);
       setSummary({ income: totalIncome, expense: totalExpense, balance: totalIncome - totalExpense });
 
-    } catch (e) { console.error(e); } 
+    } catch (e) { 
+        console.error("Erro fatal no financeiro:", e); 
+        // Em caso de erro, zera para não quebrar a tela inteira
+        setTransactions([]);
+        setSummary({ income: 0, expense: 0, balance: 0 });
+    } 
     finally { setLoading(false); }
   };
 
@@ -147,11 +165,11 @@ export default function FinancePage() {
       try {
           const payload = {
               description: formData.description,
-              amount: parseFloat(formData.amount),
+              amount: parseFloat(formData.amount), // Garante salvar como número
               category: formData.category,
               type: formData.type,
               date: formData.date,
-              clientId: formData.clientId || null, // Salva o vínculo se houver
+              clientId: formData.clientId || null, 
               updatedAt: serverTimestamp()
           };
 
@@ -317,7 +335,6 @@ export default function FinancePage() {
                             <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Categoria</label>
                             <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto">
                                 {CATEGORIES.map(cat => {
-                                    // Filtra categorias visuais baseadas no tipo (opcional, aqui mostro todas mas destaco a selecionada)
                                     return (
                                         <button 
                                             key={cat.id} 
