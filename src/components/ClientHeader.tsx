@@ -10,6 +10,7 @@ import {
   LogIn, LogOut, Package, ChevronDown, FileText 
 } from "lucide-react";
 import { useState } from "react";
+import NotificationBell from "./NotificationBell";
 
 export default function ClientHeader() {
   const pathname = usePathname();
@@ -78,6 +79,7 @@ export default function ClientHeader() {
 
           {/* 4. AÇÕES DIREITA */}
           <div className="flex items-center gap-3">
+            <NotificationBell />
             {/* Carrinho */}
             <Link href="/cart" className="relative p-2.5 bg-white rounded-full text-stone-700 hover:bg-pink-50 hover:text-pink-600 transition border border-stone-100 shadow-sm group">
                 <ShoppingBag size={20}/>
