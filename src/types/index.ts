@@ -73,18 +73,17 @@ export interface CartItem extends Product {
   finalPrice: number;
 }
 
-// --- ATUALIZAÇÃO NO PERFIL E ENDEREÇO ---
 export interface UserAddress {
   id: string;
-  nickname: string; // Ex: "Casa", "Trabalho"
+  nickname: string;
   regionType: 'plano_diretor' | 'outras_localidades';
-  sectorName?: string; // Nome do setor (se for outras localidades)
+  sectorName?: string;
   street: string;
   number: string;
   district: string;
   complement?: string;
   cep: string;
-  location?: { lat: number; lng: number }; // Coordenadas salvas
+  location?: { lat: number; lng: number };
 }
 
 export interface UserProfile {
@@ -95,8 +94,8 @@ export interface UserProfile {
   clientType?: ClientType; 
   createdAt: any;
   phone?: string;
-  savedAddresses?: UserAddress[]; // Agora tipado corretamente
-  address?: any; // Legado
+  savedAddresses?: UserAddress[];
+  address?: any;
 }
 
 export interface Order {
@@ -119,7 +118,7 @@ export interface Order {
   description?: string;
 }
 
-// --- CONFIGURAÇÕES DE LOJA E FRETE ---
+// --- CONFIGURAÇÕES DE LOJA ---
 
 export interface PaymentMethodConfig {
   active: boolean;
@@ -139,20 +138,18 @@ export interface ShippingFixedArea {
   name: string;
   price: number;
   type: 'fixed' | 'km_plus_tax';
-  tax?: number; // Taxa extra se for km_plus_tax
+  tax?: number;
 }
 
 export interface StoreSettings {
   id?: string; 
-  isOpen: boolean;
+  isOpen: boolean; // <--- STATUS DA LOJA
   
-  // Dados Gerais
   storeName: string;
   cnpj: string;
-  email: string; 
+  email: string;
   whatsapp: string;
   
-  // Endereço Base
   address: {
     street: string;
     number: string;
@@ -166,7 +163,6 @@ export interface StoreSettings {
     lng: number;
   };
 
-  // Financeiro
   pix: {
     key: string;
     name: string;
@@ -181,7 +177,6 @@ export interface StoreSettings {
     monthly: PaymentMethodConfig;
   };
 
-  // Frete Avançado
   shipping: {
     distanceTable: ShippingDistanceRule[];
     fixedAreas: ShippingFixedArea[];
