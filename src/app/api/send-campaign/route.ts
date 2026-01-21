@@ -11,8 +11,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Título e Mensagem são obrigatórios' }, { status: 400 });
     }
 
-    // 1. SALVAR NO HISTÓRICO DO APP (Para o Sininho funcionar)
-    // Criamos uma coleção 'campaigns' que todos os usuários podem ler
+    // 1. Salvar no Banco (Histórico/Sininho)
     await adminDb.collection('campaigns').add({
         title,
         body,
@@ -20,31 +19,29 @@ export async function POST(request: Request) {
         active: true
     });
 
-    // 2. BUSCAR TOKENS PARA PUSH (Para o celular vibrar)
-    const usersSnap = await adminDb.collection('users')
-      .where('pushToken', '!=', null)
-      .get();
-    
+    // 2. Buscar Tokens
+    const usersSnap = await adminDb.collection('users').where('pushToken', '!=', null).get();
     const tokens: string[] = [];
     usersSnap.forEach(doc => {
       const data = doc.data();
-      if (data.pushToken && data.pushToken.length > 10) {
-        tokens.push(data.pushToken);
-      }
+      if (data.pushToken && data.pushToken.length > 10) tokens.push(data.pushToken);
     });
 
-    // Se não tiver tokens, salvamos no banco mas avisamos que não foi push
     if (tokens.length === 0) {
-      return NextResponse.json({ 
-        success: true, 
-        sentCount: 0, 
-        message: 'Salvo no Sininho, mas nenhum celular para Push.' 
-      });
+      return NextResponse.json({ success: true, sentCount: 0, message: 'Salvo no histórico, mas sem tokens para Push.' });
     }
 
-    // 3. ENVIAR PUSH
+    // 3. Enviar Push (CORRIGIDO PARA TER AÇÃO DE CLIQUE)
     const response = await adminMessaging.sendEachForMulticast({
-      notification: { title, body },
+      notification: { 
+          title: title, 
+          body: body,
+      },
+      // Dados invisíveis que o Service Worker usa para saber onde clicar
+      data: {
+          url: "/", // Redireciona para a Home ao clicar
+          click_action: "/" 
+      },
       tokens: tokens,
     });
 
