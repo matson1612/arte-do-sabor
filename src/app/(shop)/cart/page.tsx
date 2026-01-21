@@ -190,9 +190,70 @@ export default function CartPage() {
             </div>
         </div>
 
-        {/* Modais Endereço e PIX (Mantidos igual ao anterior) */}
-        {isAddrModalOpen && (/* ...igual... */ null)}
-        {showPixModal && (/* ...igual... */ null)}
+      {/* MODAL NOVO/EDITAR ENDEREÇO */}
+      {isAddrModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                <div className="bg-white w-full max-w-md rounded-2xl p-6 h-[85vh] sm:h-auto overflow-y-auto animate-in slide-in-from-bottom">
+                    <h2 className="font-bold text-lg mb-4">{editingAddrId ? 'Editar Endereço' : 'Novo Endereço'}</h2>
+                    <div className="space-y-4">
+                        <div><label className="text-xs font-bold text-gray-500 uppercase">Salvar como</label><input className="w-full p-2 border rounded" placeholder="Ex: Casa, Trabalho" value={newAddr.nickname} onChange={e => setNewAddr({...newAddr, nickname: e.target.value})} /></div>
+
+                        <div className="flex bg-gray-100 p-1 rounded-lg">
+                            <button onClick={() => setNewAddr({...newAddr, regionType: 'plano_diretor', sectorName: undefined})} className={`flex-1 py-2 text-xs font-bold rounded ${newAddr.regionType === 'plano_diretor' ? 'bg-white shadow text-slate-800' : 'text-gray-500'}`}>Plano Diretor</button>
+                            <button onClick={() => setNewAddr({...newAddr, regionType: 'outras_localidades'})} className={`flex-1 py-2 text-xs font-bold rounded ${newAddr.regionType === 'outras_localidades' ? 'bg-white shadow text-slate-800' : 'text-gray-500'}`}>Outras Regiões</button>
+                        </div>
+
+                        {newAddr.regionType === 'plano_diretor' ? (
+                            <div className="flex gap-2"><input className="w-full p-2 border rounded" placeholder="CEP (Busca Auto)" value={newAddr.cep} onChange={e => setNewAddr({...newAddr, cep: e.target.value})} maxLength={9}/><button onClick={handleBuscaCep} className="bg-slate-800 text-white px-3 rounded"><Search size={18}/></button></div>
+                        ) : (
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 uppercase">Selecione o Setor</label>
+                                <select className="w-full p-2 border rounded bg-white" value={newAddr.sectorName || ''} onChange={e => setNewAddr({...newAddr, sectorName: e.target.value})}>
+                                    <option value="">-- Selecione --</option>
+                                    {storeSettings?.shipping.fixedAreas.map(area => (
+                                        <option key={area.id} value={area.name}>{area.name} (+R$ {area.price})</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+
+                        <div><input className="w-full p-2 border rounded bg-gray-50" placeholder="Rua / Quadra" value={newAddr.street} onChange={e => setNewAddr({...newAddr, street: e.target.value})} /></div>
+                        <div className="flex gap-2"><input className="w-24 p-2 border rounded" placeholder="Nº" value={newAddr.number} onChange={e => setNewAddr({...newAddr, number: e.target.value})} /><input className="flex-1 p-2 border rounded" placeholder="Complemento" value={newAddr.complement} onChange={e => setNewAddr({...newAddr, complement: e.target.value})} /></div>
+
+                        <div className="h-40 rounded-lg overflow-hidden border relative bg-gray-100">
+                            {isLoaded && <GoogleMap mapContainerStyle={{width:'100%',height:'100%'}} center={addrMapLoc} zoom={16} onClick={(e) => e.latLng && setAddrMapLoc({lat: e.latLng.lat(), lng: e.latLng.lng()})}><Marker position={addrMapLoc} draggable onDragEnd={(e) => e.latLng && setAddrMapLoc({lat: e.latLng.lat(), lng: e.latLng.lng()})}/></GoogleMap>}
+                            
+                            {/* BOTÃO COPIAR LINK */}
+                            <div className="absolute top-2 right-2"><button onClick={handleCopyPix} className="bg-white/90 p-2 rounded-lg shadow text-blue-600 hover:text-blue-800 border border-blue-100" title="Copiar Link do Mapa"><Copy size={16}/></button></div>
+                            <div className="absolute bottom-1 left-0 w-full text-center"><span className="bg-white/80 text-[10px] px-2 rounded shadow">Confirme a localização no mapa</span></div>
+                        </div>
+
+                        <div className="flex gap-2 pt-2"><button onClick={() => setIsAddrModalOpen(false)} className="flex-1 py-3 border rounded-xl font-bold">Cancelar</button><button onClick={handleSaveAddress} className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-bold">Salvar Endereço</button></div>
+                    </div>
+                </div>
+            </div>
+        )}
+
+      {/* Modal PIX */}
+      {showPixModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl p-6 relative animate-in zoom-in-95 duration-300">
+                  <button onClick={() => setShowPixModal(false)} className="absolute top-4 right-4 text-stone-400 hover:text-stone-600 p-2 rounded-full hover:bg-stone-100"><X size={20}/></button>
+                  <div className="text-center mb-6">
+                      <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3"><QrCode size={24}/></div>
+                      <h3 className="text-xl font-bold text-stone-800">Pagamento PIX</h3>
+                      <p className="text-sm text-stone-500">Valor Total: <strong className="text-emerald-600">R$ {(cartTotal + shippingPrice).toFixed(2)}</strong></p>
+                  </div>
+                  <div className="flex justify-center mb-6 p-4 bg-white border-2 border-stone-100 rounded-2xl shadow-inner">
+                      <QRCodeSVG value={pixCode} size={200} />
+                  </div>
+                  <button onClick={handleCopyPix} className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${pixCopied ? 'bg-green-600 text-white' : 'bg-stone-900 text-white hover:bg-stone-800'}`}>
+                      {pixCopied ? <CheckCircle size={18}/> : <Copy size={18}/>}
+                      {pixCopied ? "Código Copiado!" : "Copiar Código PIX"}
+                  </button>
+              </div>
+          </div>
+      )}
     </div>
   );
 }
