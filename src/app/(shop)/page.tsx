@@ -3,11 +3,11 @@
 
 import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import { collection, getDocs, query, orderBy, getDoc, doc } from "firebase/firestore";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
-import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X, CheckSquare, MessageSquare, AlertCircle } from "lucide-react";
-import { Product, ComplementGroup, Option, Category } from "@/types";
+import { Plus, Minus, Loader2, ShoppingBag, ImageOff, X, CheckSquare, MessageSquare, AlertCircle, Clock } from "lucide-react";
+import { Product, ComplementGroup, Option, Category, StoreSettings } from "@/types";
 import HeroCarousel from "@/components/HeroCarousel";
 
 export default function ShopHome() {
@@ -16,6 +16,7 @@ export default function ShopHome() {
   
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
   const [loading, setLoading] = useState(true);
   
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -38,11 +39,14 @@ export default function ShopHome() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [productsSnap, groupsSnap, catsSnap] = await Promise.all([
+        const [productsSnap, groupsSnap, catsSnap, settingsSnap] = await Promise.all([
             getDocs(query(collection(db, "products"), orderBy("name"))),
             getDocs(collection(db, "complement_groups")),
-            getDocs(query(collection(db, "categories"), orderBy("order")))
+            getDocs(query(collection(db, "categories"), orderBy("order"))),
+            getDoc(doc(db, "store_settings", "config"))
         ]);
+
+        if (settingsSnap.exists()) setStoreSettings(settingsSnap.data() as StoreSettings);
 
         const productMap = new Map<string, Product>();
         productsSnap.docs.forEach(doc => { productMap.set(doc.id, { id: doc.id, ...doc.data() } as Product); });
@@ -61,10 +65,9 @@ export default function ShopHome() {
         });
 
         const items = Array.from(productMap.values()).map((p) => {
-          const channel = p.salesChannel || 'delivery';
           const groupIds = p.complementGroupIds || [];
           const loadedGroups = groupIds.map((id: string) => groupsMap[id]).filter(Boolean);
-          return { ...p, salesChannel: channel, fullGroups: loadedGroups };
+          return { ...p, fullGroups: loadedGroups };
         });
 
         setProducts(items);
@@ -120,6 +123,11 @@ export default function ShopHome() {
   };
 
   const handleAddToCart = () => {
+    // BLOQUEIO DE LOJA FECHADA
+    if (storeSettings && storeSettings.isOpen === false) {
+        return alert("A loja está fechada no momento. Você pode navegar pelo cardápio, mas não estamos aceitando pedidos agora.");
+    }
+
     if (!selectedProduct) return;
     if (selectedProduct.stock !== null && selectedProduct.stock <= 0) return alert("Produto esgotado.");
     const missingRequired = selectedProduct.fullGroups?.find(g => g.required && (!selectedOptions[g.id] || selectedOptions[g.id].length === 0));
@@ -132,12 +140,25 @@ export default function ShopHome() {
     setSelectedProduct(null);
   };
 
+  const isStoreClosed = storeSettings?.isOpen === false;
+
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-pink-500" size={40}/></div>;
 
   return (
     <div className="space-y-10 pb-24">
       <HeroCarousel products={products} onProductClick={openModal} />
       
+      {/* Banner Loja Fechada */}
+      {isStoreClosed && (
+          <div className="bg-red-50 border-l-4 border-red-500 p-4 mx-4 rounded-r-lg flex items-center gap-3 animate-in slide-in-from-top">
+              <Clock className="text-red-600" size={24}/>
+              <div>
+                  <h3 className="font-bold text-red-800">Loja Fechada</h3>
+                  <p className="text-sm text-red-700">Estamos apenas exibindo nosso cardápio. Pedidos indisponíveis no momento.</p>
+              </div>
+          </div>
+      )}
+
       {visibleProducts.length === 0 ? (
         <div className="text-center text-stone-400 py-20"><ShoppingBag size={48} className="mx-auto mb-4 opacity-20"/><p>Nenhuma delícia disponível agora.</p></div>
       ) : (
@@ -152,31 +173,28 @@ export default function ShopHome() {
               <section key={category.id}>
                 <div className="flex items-center gap-4 mb-6"><h3 className="text-2xl font-bold text-stone-800 capitalize tracking-tight">{category.name}</h3><div className="h-[1px] flex-1 bg-stone-200"></div></div>
                 
-                {/* GRID RESPONSIVO: Cards mais flexíveis no mobile */}
                 <div className="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
                   {items.map((product) => {
                     const isOutOfStock = product.stock !== null && product.stock <= 0;
                     return (
-                      <div key={product.id} onClick={() => openModal(product)} className={`group bg-white rounded-3xl p-3 shadow-sm hover:shadow-xl border border-stone-50 relative overflow-hidden flex gap-3 md:gap-4 cursor-pointer transition-all ${isOutOfStock ? 'opacity-60 grayscale' : ''}`}>
+                      <div key={product.id} onClick={() => openModal(product)} className={`group bg-white rounded-3xl p-3 shadow-sm hover:shadow-xl border border-stone-50 relative overflow-hidden flex gap-4 cursor-pointer transition-all ${isOutOfStock ? 'opacity-60 grayscale' : ''}`}>
                         {isOutOfStock && <div className="absolute inset-0 z-20 bg-stone-100/50 backdrop-blur-[1px] flex items-center justify-center"><span className="bg-stone-800 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest">Esgotado</span></div>}
                         
-                        {/* Imagem Adaptável: w-24 no mobile para sobrar espaço */}
+                        {/* Badge FECHADO */}
+                        {isStoreClosed && <div className="absolute top-2 right-2 bg-red-100 text-red-600 text-[10px] font-bold px-2 py-1 rounded-full z-10 border border-red-200">FECHADO</div>}
+
                         <div className="w-24 h-24 md:w-28 md:h-28 rounded-2xl overflow-hidden flex-shrink-0 bg-stone-100 relative shadow-inner">
                             {product.imageUrl ? <img src={product.imageUrl} className="w-full h-full object-cover group-hover:scale-110 transition duration-500" /> : <ImageOff className="m-auto mt-8 md:mt-10 text-stone-300" size={24} />}
                         </div>
                         
-                        {/* Conteúdo com min-w-0 para evitar estouro de texto */}
                         <div className="flex-1 flex flex-col justify-between py-1 min-w-0">
                             <div>
                                 <h4 className="font-bold text-stone-800 text-base md:text-lg leading-tight line-clamp-2 mb-1">{product.name}</h4>
                                 <p className="text-xs text-stone-500 line-clamp-2 leading-relaxed">{product.description}</p>
                             </div>
-                            <div className="flex justify-between items-end mt-2 gap-2">
-                                <div className="flex flex-col min-w-0">
-                                    <span className="text-[10px] text-stone-400 font-bold uppercase truncate">A partir de</span>
-                                    <span className="font-bold text-base md:text-lg text-emerald-600">{getPrice(product).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                                </div>
-                                {!isOutOfStock && <button className="bg-stone-900 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:bg-pink-600 transition-colors flex-shrink-0"><Plus size={16} /></button>}
+                            <div className="flex justify-between items-end mt-2">
+                                <div className="flex flex-col"><span className="text-[10px] text-stone-400 font-bold uppercase">A partir de</span><span className="font-bold text-base md:text-lg text-emerald-600">{getPrice(product).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></div>
+                                {!isOutOfStock && !isStoreClosed && <button className="bg-stone-900 text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:bg-pink-600 transition-colors"><Plus size={16} /></button>}
                             </div>
                         </div>
                       </div>
@@ -188,21 +206,16 @@ export default function ShopHome() {
         })
       )}
       
-      {/* --- MODAL RESPONSIVO (Fix para Mobile) --- */}
       {selectedProduct && (
-        // z-[100] garante prioridade sobre menus. pt-24 e pb-4 criam margem segura.
         <div className="fixed inset-0 z-[100] flex justify-center items-center bg-stone-900/60 p-4 pt-24 pb-4 animate-in fade-in duration-300 backdrop-blur-sm">
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
             <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl relative animate-in slide-in-from-bottom-8 duration-300 flex flex-col h-full max-h-[calc(100vh-100px)]">
-                
-                {/* Imagem do Modal (h-48 no mobile, h-56 no PC) */}
                 <div className="h-48 md:h-56 bg-stone-100 relative flex-shrink-0">
                     <button onClick={() => setSelectedProduct(null)} className="absolute top-4 right-4 z-20 bg-white/80 backdrop-blur text-stone-800 p-2 rounded-full hover:bg-white shadow-sm transition"><X size={20}/></button>
                     {selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-stone-300"><ImageOff size={40}/></div>}
                     {selectedProduct.stock !== null && selectedProduct.stock <= 0 && <div className="absolute inset-0 bg-stone-900/50 backdrop-blur-[2px] flex items-center justify-center z-10"><span className="bg-red-500 text-white px-4 py-2 rounded-full font-bold uppercase shadow-lg flex items-center gap-2"><AlertCircle size={20}/> Produto Esgotado</span></div>}
                     <div className="absolute bottom-0 inset-x-0 h-20 bg-gradient-to-t from-white to-transparent"></div>
                 </div>
-
                 <div className="p-6 pt-0 space-y-6 flex-1 overflow-y-auto">
                     <div><h2 className="text-2xl font-bold text-stone-800 mb-1">{selectedProduct.name}</h2><p className="text-stone-500 text-sm leading-relaxed">{selectedProduct.description}</p></div>
                     {selectedProduct.fullGroups?.map(group => (
@@ -214,17 +227,20 @@ export default function ShopHome() {
                                 return (<div key={opt.id} onClick={() => !optOutOfStock && toggleOption(group, opt)} className={`flex justify-between items-center p-3 rounded-xl border transition-all cursor-pointer ${optOutOfStock ? 'opacity-50 bg-stone-50 cursor-not-allowed' : isSelected ? 'border-pink-500 bg-pink-50/30 ring-1 ring-pink-500' : 'border-stone-100 hover:border-pink-200 bg-white'}`}><div className="flex items-center gap-3"><div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${isSelected ? 'bg-pink-500 border-pink-500 text-white' : 'border-stone-300'}`}>{isSelected && <CheckSquare size={14}/>}</div><span className="text-sm font-medium text-stone-700">{opt.name} {optOutOfStock && '(Esgotado)'}</span></div>{!optOutOfStock && getOptionPrice(opt) > 0 && <span className="text-xs font-bold text-emerald-600">+ R$ {getOptionPrice(opt).toFixed(2)}</span>}</div>) })}</div>
                         </div>
                     ))}
-                    <div><label className="font-bold text-stone-700 text-sm mb-2 flex items-center gap-2"><MessageSquare size={16}/> Alguma observação?</label><textarea className="w-full p-3 border border-stone-200 rounded-xl bg-stone-50 focus:bg-white focus:ring-2 focus:ring-pink-100 text-sm outline-none transition" rows={2} placeholder="Ex: Tirar cebola, caprichar no molho..." value={observation} onChange={e => setObservation(e.target.value)}/></div>
+                    <div><label className="font-bold text-stone-700 text-sm mb-2 flex items-center gap-2"><MessageSquare size={16}/> Alguma observação?</label><textarea className="w-full p-3 border border-stone-200 rounded-xl bg-stone-50 focus:bg-white focus:ring-2 focus:ring-pink-100 text-sm outline-none transition" rows={2} placeholder="Ex: Tirar cebola..." value={observation} onChange={e => setObservation(e.target.value)}/></div>
                 </div>
-                
-                {/* Footer do Modal */}
                 <div className="p-4 bg-white border-t border-stone-100 flex items-center gap-4 flex-shrink-0">
                     {(() => {
                         const isOutOfStock = selectedProduct.stock !== null && selectedProduct.stock <= 0;
                         return (
                             <>
                                 <div className={`flex items-center bg-stone-100 rounded-xl h-12 px-1 ${isOutOfStock ? 'opacity-50 pointer-events-none' : ''}`}><button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="w-10 h-full flex items-center justify-center hover:text-pink-600 transition"><Minus size={18}/></button><span className="w-8 text-center font-bold text-lg text-stone-800">{quantity}</span><button onClick={() => setQuantity(q => q + 1)} className="w-10 h-full flex items-center justify-center hover:text-pink-600 transition"><Plus size={18}/></button></div>
-                                <button onClick={handleAddToCart} disabled={isOutOfStock} className={`flex-1 font-bold h-12 rounded-xl flex justify-between items-center px-6 shadow-lg transition-all active:scale-95 ${isOutOfStock ? 'bg-stone-300 text-stone-500 cursor-not-allowed shadow-none' : 'bg-stone-900 text-white hover:bg-stone-800 shadow-stone-200'}`}><span>{isOutOfStock ? 'Produto Esgotado' : 'Adicionar'}</span>{!isOutOfStock && <span className="opacity-90">{calculateTotal().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>}</button>
+                                
+                                {/* BOTÃO DE AÇÃO NO MODAL (BLOQUEADO SE FECHADO) */}
+                                <button onClick={handleAddToCart} disabled={isOutOfStock || isStoreClosed} className={`flex-1 font-bold h-12 rounded-xl flex justify-between items-center px-6 shadow-lg transition-all active:scale-95 ${isOutOfStock || isStoreClosed ? 'bg-stone-300 text-stone-500 cursor-not-allowed shadow-none' : 'bg-stone-900 text-white hover:bg-stone-800 shadow-stone-200'}`}>
+                                    <span>{isOutOfStock ? 'Produto Esgotado' : isStoreClosed ? 'Loja Fechada' : 'Adicionar'}</span>
+                                    {!isOutOfStock && !isStoreClosed && <span className="opacity-90">{calculateTotal().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>}
+                                </button>
                             </>
                         );
                     })()}
