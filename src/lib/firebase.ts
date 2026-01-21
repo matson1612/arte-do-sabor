@@ -14,7 +14,7 @@ const firebaseConfig = {
 };
 
 // Inicializa o App
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 // Configuração do Firestore
 const db = initializeFirestore(app, {

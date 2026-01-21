@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from "react";
 import AdminSidebar from "@/components/AdminSidebar";
+import AdminOrderMonitor from "@/components/AdminOrderMonitor"; // <--- IMPORTAR
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { Loader2, Menu } from "lucide-react";
@@ -23,12 +24,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   return (
     <div className="flex min-h-screen bg-gray-50">
+      {/* Componente de Alerta Sonoro */}
+      <AdminOrderMonitor />
+
       {/* Menu Lateral */}
       <AdminSidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       {/* Conteúdo Principal */}
       <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${isSidebarOpen ? 'lg:ml-64' : 'lg:ml-64'}`}>
-        {/* CORREÇÃO AQUI: lg:ml-64 garante margem só no PC. No mobile fica sem margem. */}
         
         {/* Header Mobile */}
         <header className="lg:hidden bg-white border-b p-4 flex items-center gap-4 sticky top-0 z-30 shadow-sm">
@@ -42,7 +45,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </header>
 
         {/* Área de Conteúdo */}
-        {/* Adicionei overflow-x-hidden para evitar rolagem horizontal indesejada da página inteira */}
         <main className="flex-1 p-4 md:p-8 overflow-x-hidden">
             {children}
         </main>
