@@ -12,8 +12,9 @@ import {
   LogOut,
   Store,
   X,
-  DollarSign, // Novo Ícone
-  List // Novo Ícone
+  DollarSign, 
+  List,
+  Megaphone // <--- Ícone Novo Importado
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 
@@ -30,9 +31,10 @@ export default function AdminSidebar({ isOpen, onClose }: SidebarProps) {
     { name: "Dashboard", href: "/admin/dashboard", icon: LayoutDashboard },
     { name: "Pedidos", href: "/admin/orders", icon: ShoppingBag },
     { name: "Cardápio", href: "/admin", icon: UtensilsCrossed },
-    { name: "Categorias", href: "/admin/categories", icon: List }, // <--- NOVO
+    { name: "Categorias", href: "/admin/categories", icon: List },
     { name: "Clientes", href: "/admin/customers", icon: Users },
-    { name: "Fluxo de Caixa", href: "/admin/finance", icon: DollarSign }, // <--- NOVO
+    { name: "Fluxo de Caixa", href: "/admin/finance", icon: DollarSign },
+    { name: "Marketing & Push", href: "/admin/marketing", icon: Megaphone }, // <--- NOVO ITEM
     { name: "Loja & Frete", href: "/admin/settings", icon: Settings },
   ];
 
