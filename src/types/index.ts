@@ -92,10 +92,12 @@ export interface UserProfile {
   email: string;
   photoURL?: string;
   clientType?: ClientType; 
+  role?: 'admin' | 'user'; // <--- CORREÇÃO AQUI (Adicionado)
   createdAt: any;
   phone?: string;
   savedAddresses?: UserAddress[];
   address?: any;
+  pushToken?: string; // (Opcional: já adicionando para o Push Notification)
 }
 
 export interface Order {
@@ -143,7 +145,7 @@ export interface ShippingFixedArea {
 
 export interface StoreSettings {
   id?: string; 
-  isOpen: boolean; // <--- STATUS DA LOJA
+  isOpen: boolean; 
   
   storeName: string;
   cnpj: string;

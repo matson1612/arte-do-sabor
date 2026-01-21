@@ -1,6 +1,7 @@
 // src/app/api/send-campaign/route.ts
 import { NextResponse } from 'next/server';
 import { adminMessaging, adminDb } from '@/lib/firebaseAdmin';
+import { Timestamp } from 'firebase-admin/firestore';
 
 export async function POST(request: Request) {
   try {
@@ -10,39 +11,42 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Título e Mensagem são obrigatórios' }, { status: 400 });
     }
 
-    // 1. Buscar todos os usuários que têm pushToken salvo e válido
+    // 1. SALVAR NO HISTÓRICO DO APP (Para o Sininho funcionar)
+    // Criamos uma coleção 'campaigns' que todos os usuários podem ler
+    await adminDb.collection('campaigns').add({
+        title,
+        body,
+        createdAt: Timestamp.now(),
+        active: true
+    });
+
+    // 2. BUSCAR TOKENS PARA PUSH (Para o celular vibrar)
     const usersSnap = await adminDb.collection('users')
       .where('pushToken', '!=', null)
       .get();
     
-    // Filtra tokens vazios ou inválidos
     const tokens: string[] = [];
     usersSnap.forEach(doc => {
       const data = doc.data();
-      if (data.pushToken && typeof data.pushToken === 'string' && data.pushToken.length > 10) {
+      if (data.pushToken && data.pushToken.length > 10) {
         tokens.push(data.pushToken);
       }
     });
 
-    // Se não encontrou ninguém, retorna 0 com sucesso (para não quebrar o front)
+    // Se não tiver tokens, salvamos no banco mas avisamos que não foi push
     if (tokens.length === 0) {
       return NextResponse.json({ 
         success: true, 
         sentCount: 0, 
-        message: 'Nenhum dispositivo cadastrado encontrado.' 
+        message: 'Salvo no Sininho, mas nenhum celular para Push.' 
       });
     }
 
-    // 2. Enviar mensagem em massa (limite de 500 por lote, mas o admin sdk gerencia bem)
+    // 3. ENVIAR PUSH
     const response = await adminMessaging.sendEachForMulticast({
       notification: { title, body },
       tokens: tokens,
     });
-
-    // Limpeza de tokens inválidos (opcional, mas recomendado)
-    if (response.failureCount > 0) {
-      console.log(`Falha em ${response.failureCount} envios. Tokens podem estar expirados.`);
-    }
 
     return NextResponse.json({ 
       success: true, 
@@ -52,6 +56,6 @@ export async function POST(request: Request) {
 
   } catch (error: any) {
     console.error('Erro API:', error);
-    return NextResponse.json({ error: error.message || "Erro interno" }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
