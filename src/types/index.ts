@@ -144,6 +144,7 @@ export interface ShippingFixedArea {
 
 export interface StoreSettings {
   id?: string; 
+  isOpen: boolean;
   
   // Dados Gerais
   storeName: string;
