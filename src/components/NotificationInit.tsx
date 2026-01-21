@@ -3,38 +3,44 @@
 
 import { useEffect } from "react";
 import { getMessaging, getToken } from "firebase/messaging";
-import { app } from "@/lib/firebase";
+import { app, db } from "@/lib/firebase";
+import { doc, updateDoc, setDoc, getDoc } from "firebase/firestore";
+import { useAuth } from "@/context/AuthContext"; // Importe seu contexto de auth
 
 export default function NotificationInit() {
+  const { user } = useAuth(); // Precisa do usuário logado
+
   useEffect(() => {
     const setupNotifications = async () => {
-      // Verifica se está no navegador e se suporta Service Worker
-      if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+      if (typeof window !== "undefined" && "serviceWorker" in navigator && user) {
         try {
           const messaging = getMessaging(app);
           
-          // Solicita permissão ao usuário
+          // Solicita permissão
           const permission = await Notification.requestPermission();
           
           if (permission === 'granted') {
-            // Obtém o Token (Necessário gerar a VAPID Key no Firebase Console > Cloud Messaging)
+            // Pegue sua VAPID Key nas Configurações do Projeto no Firebase Console > Cloud Messaging
             const token = await getToken(messaging, {
-              vapidKey: "INSIRA_SUA_VAPID_KEY_AQUI" 
+              vapidKey: "SUA_CHAVE_VAPID_AQUI" 
             });
             
             if (token) {
-              console.log("Token de Notificação (FCM):", token);
-              // Futuramente aqui você salva este token no perfil do usuário no Firestore
+              console.log("Token FCM salvo:", token);
+              // Salva o token no perfil do usuário no Firestore
+              const userRef = doc(db, "users", user.uid);
+              // Usa setDoc com merge para criar se não existir ou update se existir
+              await setDoc(userRef, { pushToken: token }, { merge: true });
             }
           }
         } catch (error) {
-          console.error("Erro ao ativar notificações:", error);
+          console.error("Erro notificação:", error);
         }
       }
     };
 
     setupNotifications();
-  }, []);
+  }, [user]); // Roda quando o usuário logar
 
-  return null; // Este componente não renderiza nada visualmente
+  return null;
 }
