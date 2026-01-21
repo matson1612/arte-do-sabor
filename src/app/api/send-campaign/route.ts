@@ -10,7 +10,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Título e Mensagem são obrigatórios' }, { status: 400 });
     }
 
-    // 1. Buscar todos os usuários que têm pushToken
+    // 1. Buscar todos os usuários que têm pushToken salvo
     const usersSnap = await adminDb.collection('users').where('pushToken', '!=', null).get();
     
     const tokens: string[] = [];
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: 'Nenhum cliente com notificação ativa encontrado.' });
     }
 
-    // 2. Enviar mensagem em massa (Multicast)
+    // 2. Enviar mensagem em massa
     const message = {
       notification: {
         title: title,
