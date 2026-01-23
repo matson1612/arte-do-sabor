@@ -116,7 +116,7 @@ export default function CustomerInvoicePage({ params }: PageProps) {
             </div>
         </div>
 
-        {/* Info Cliente & Resumo (Empilhado no Mobile) */}
+        {/* Info Cliente & Resumo */}
         <div className="flex flex-col md:flex-row justify-between gap-6 mb-8">
             <div className="flex-1 bg-slate-50 p-4 md:p-5 rounded-lg border border-slate-100">
                 <p className="text-xs font-bold text-gray-400 uppercase mb-2">Faturado Para</p>
@@ -132,7 +132,7 @@ export default function CustomerInvoicePage({ params }: PageProps) {
             </div>
         </div>
 
-        {/* Tabela de Itens (Com Scroll Horizontal) */}
+        {/* Tabela de Itens */}
         <div className="mb-8 overflow-x-auto">
             <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2 text-sm uppercase tracking-wide border-b border-gray-100 pb-2 min-w-[600px]">
                 <FileText size={16} className="text-pink-500"/> Detalhamento de Consumo
@@ -154,11 +154,15 @@ export default function CustomerInvoicePage({ params }: PageProps) {
                         orders.map((order, idx) => {
                             const date = order.createdAt?.seconds ? new Date(order.createdAt.seconds * 1000) : new Date();
                             
+                            // LÓGICA DE DESCRIÇÃO CORRIGIDA
                             let description = order.description || "Pedido de Venda"; 
-                            if (!order.isManual && order.items) {
+                            
+                            // Agora tentamos ler os itens SEMPRE, mesmo se for manual
+                            if (order.items) {
                                 try {
                                     const parsed = JSON.parse(order.items);
                                     if (Array.isArray(parsed) && parsed.length > 0) {
+                                        // Substitui "Manual" pela lista real de itens (ex: "1x Bolo")
                                         description = parsed.map((i: any) => `${i.quantity}x ${i.name}`).join(", ");
                                     }
                                 } catch (e) {}
@@ -178,6 +182,7 @@ export default function CustomerInvoicePage({ params }: PageProps) {
                                     </td>
                                     <td className="py-4 px-4 align-top text-gray-800">
                                         <span className="block line-clamp-2 md:line-clamp-none">{description}</span>
+                                        {/* Mantivemos o balão azul de Lançamento Manual conforme solicitado */}
                                         {order.isManual && <span className="inline-block mt-1 text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded font-bold border border-blue-100">Lançamento Manual</span>}
                                     </td>
                                     <td className={`py-4 px-4 text-right align-top font-bold ${isCredit ? 'text-green-600' : 'text-slate-900'}`}>

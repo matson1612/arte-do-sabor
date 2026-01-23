@@ -1,3 +1,4 @@
+// src/app/(admin)/admin/finance/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -6,9 +7,9 @@ import { collection, getDocs, query, orderBy, addDoc, serverTimestamp, deleteDoc
 import { 
   Loader2, TrendingUp, TrendingDown, DollarSign, Plus, Calendar, 
   Trash2, ArrowUpRight, ArrowDownLeft, Filter, User, Pencil, X, Clock,
-  FileText, Printer, CheckCircle, Search, Phone // <--- NOVOS IMPORTS
+  FileText, Printer, CheckCircle, Search, Phone, Tag, CheckCheck // <--- CheckCheck importado
 } from "lucide-react";
-import { FinancialRecord, Order, ExpenseCategory, UserProfile } from "@/types";
+import { Order, ExpenseCategory, UserProfile } from "@/types";
 
 const CATEGORIES: { id: ExpenseCategory; label: string; color: string }[] = [
     { id: 'venda_manual', label: 'Venda Direta / Balcão', color: 'bg-emerald-100 text-emerald-700' },
@@ -21,12 +22,21 @@ const CATEGORIES: { id: ExpenseCategory; label: string; color: string }[] = [
     { id: 'outros', label: 'Outros', color: 'bg-stone-100 text-stone-700' },
 ];
 
-// Interface auxiliar para a Boleta
+// Interface unificada para itens da boleta
+interface BoletaItem {
+  id: string;
+  type: 'order' | 'manual';
+  description: string; 
+  dateObj: Date;
+  amount: number;
+  originalData?: any; // Para acessar os itens do pedido
+}
+
 interface ClientDebt {
   userName: string;
   userPhone: string;
   totalDebt: number;
-  orders: any[];
+  items: BoletaItem[];
 }
 
 export default function FinancePage() {
@@ -36,7 +46,7 @@ export default function FinancePage() {
   const [monthFilter, setMonthFilter] = useState(new Date().toISOString().slice(0, 7));
   const [users, setUsers] = useState<UserProfile[]>([]);
 
-  // Estados do Modal de Lançamento (Existente)
+  // Estados do Modal de Lançamento
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -49,7 +59,7 @@ export default function FinancePage() {
   });
   const [saving, setSaving] = useState(false);
 
-  // --- NOVOS ESTADOS PARA A BOLETA ---
+  // Estados da Boleta
   const [isBoletaOpen, setIsBoletaOpen] = useState(false);
   const [groupedDebts, setGroupedDebts] = useState<ClientDebt[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -74,7 +84,7 @@ export default function FinancePage() {
       const startDate = new Date(year, month - 1, 1);
       const endDate = new Date(year, month, 0, 23, 59, 59);
 
-      // 1. Pedidos (Receitas Automáticas)
+      // 1. Pedidos (Receitas)
       const ordersQ = query(
           collection(db, "orders"), 
           where("createdAt", ">=", startDate),
@@ -95,7 +105,9 @@ export default function FinancePage() {
                 date: o.createdAt?.seconds ? new Date(o.createdAt.seconds * 1000) : new Date(),
                 category: 'Vendas Sistema',
                 status: isRecebido ? 'recebido' : 'pendente',
-                isSystem: true
+                isSystem: true,
+                clientName: o.userName,
+                clientId: o.userId
             };
         });
 
@@ -127,10 +139,8 @@ export default function FinancePage() {
             };
         });
 
-      // 3. Unificar
       const all = [...orderIncomes, ...manualRecords].sort((a, b) => b.date.getTime() - a.date.getTime());
       
-      // --- CÁLCULOS ---
       const totalIncome = all
         .filter(t => t.type === 'income' && (t.status === 'recebido' || t.status === 'efetivado'))
         .reduce((acc, curr) => acc + (curr.amount || 0), 0);
@@ -147,53 +157,79 @@ export default function FinancePage() {
       setSummary({ income: totalIncome, expense: totalExpense, balance: totalIncome - totalExpense, receivables: totalReceivables });
 
     } catch (e) { 
-        console.error("Erro fatal no financeiro:", e); 
-        setTransactions([]);
-        setSummary({ income: 0, expense: 0, balance: 0, receivables: 0 });
+        console.error("Erro financeiro:", e); 
     } 
     finally { setLoading(false); }
   };
 
-  // --- FUNÇÕES DA BOLETA GERAL (NOVO) ---
+  // --- BOLETA GERAL E FUNÇÕES DE BAIXA ---
   const fetchBoletaData = async () => {
       setLoadingBoleta(true);
       setIsBoletaOpen(true);
       try {
-          // Busca TODOS os pedidos (sem filtro de data) para achar dívidas antigas
-          const q = query(collection(db, "orders"), orderBy("createdAt", "desc"));
-          const snap = await getDocs(q);
+          // Busca Pedidos Pendentes
+          const qOrders = query(collection(db, "orders"), orderBy("createdAt", "desc"));
+          const snapOrders = await getDocs(qOrders);
           
-          let recOrders: any[] = [];
-          
-          snap.forEach(doc => {
+          // Busca Lançamentos Manuais
+          const qExpenses = query(collection(db, "expenses"), orderBy("date", "desc"));
+          const snapExpenses = await getDocs(qExpenses);
+
+          let allItems: any[] = [];
+
+          snapOrders.forEach(doc => {
               const data = doc.data();
               if (data.status === 'cancelado') return;
-              // Se é conta aberta e NÃO está pago
               if (data.paymentMethod === 'conta_aberta' && !data.isPaid) {
-                  recOrders.push({
+                  allItems.push({
                       id: doc.id,
-                      ...data,
-                      dateObj: data.createdAt?.seconds ? new Date(data.createdAt.seconds * 1000) : new Date()
+                      type: 'order',
+                      clientId: data.userId,
+                      clientName: data.userName || "Cliente",
+                      clientPhone: data.userPhone || "",
+                      description: data.shortId, 
+                      amount: Number(data.total) || 0,
+                      dateObj: data.createdAt?.seconds ? new Date(data.createdAt.seconds * 1000) : new Date(),
+                      originalData: data
                   });
               }
           });
 
-          // Agrupar por Cliente
-          const groups: Record<string, ClientDebt> = {};
-          recOrders.forEach(order => {
-              const key = order.userPhone || order.userName || "Desconhecido";
-              if (!groups[key]) {
-                  groups[key] = {
-                      userName: order.userName || "Cliente Sem Nome",
-                      userPhone: order.userPhone || "",
-                      totalDebt: 0,
-                      orders: []
-                  };
+          snapExpenses.forEach(doc => {
+              const data = doc.data();
+              if (data.clientId) {
+                  const client = users.find(u => u.uid === data.clientId);
+                  allItems.push({
+                      id: doc.id,
+                      type: 'manual',
+                      clientId: data.clientId,
+                      clientName: client?.name || "Cliente Manual",
+                      clientPhone: client?.phone || "",
+                      description: data.description || "Lançamento Manual",
+                      amount: Number(data.amount) || 0,
+                      dateObj: data.date ? new Date(data.date + 'T12:00:00') : new Date(),
+                      originalData: data
+                  });
               }
-              groups[key].orders.push(order);
-              groups[key].totalDebt += Number(order.total) || 0;
           });
 
+          const groups: Record<string, ClientDebt> = {};
+          allItems.forEach(item => {
+              const key = item.clientId || item.clientName;
+              if (!groups[key]) {
+                  groups[key] = {
+                      userName: item.clientName,
+                      userPhone: item.clientPhone,
+                      totalDebt: 0,
+                      items: []
+                  };
+              }
+              groups[key].items.push(item);
+              groups[key].totalDebt += item.amount;
+          });
+
+          // Ordenação
+          Object.values(groups).forEach(g => g.items.sort((a, b) => b.dateObj.getTime() - a.dateObj.getTime()));
           setGroupedDebts(Object.values(groups).sort((a, b) => b.totalDebt - a.totalDebt));
 
       } catch (e) { console.error(e); alert("Erro ao gerar boleta."); }
@@ -201,13 +237,79 @@ export default function FinancePage() {
   };
 
   const handleMarkAsPaid = async (orderId: string) => {
-      if(!confirm("Confirmar recebimento deste pedido?")) return;
+      if(!confirm("Confirmar recebimento?")) return;
       try {
           await updateDoc(doc(db, "orders", orderId), { isPaid: true });
-          // Atualiza tanto a boleta quanto o dashboard
           fetchBoletaData();
           loadData(); 
       } catch (e) { alert("Erro ao atualizar."); }
+  };
+
+  const handleDeleteManual = async (id: string) => {
+      if(!confirm("Excluir este lançamento manual?")) return;
+      try {
+          await deleteDoc(doc(db, "expenses", id));
+          fetchBoletaData();
+          loadData();
+      } catch(e) { alert("Erro ao excluir."); }
+  };
+
+  // --- NOVA FUNÇÃO: BAIXAR TODOS DO CLIENTE ---
+  const handleMarkAllAsPaid = async (items: BoletaItem[]) => {
+      const total = items.reduce((acc, i) => acc + i.amount, 0);
+      if(!confirm(`Deseja baixar TODOS os ${items.length} itens deste cliente?\nTotal: R$ ${total.toFixed(2)}`)) return;
+      
+      setLoadingBoleta(true);
+      try {
+          const promises = items.map(item => {
+              if (item.type === 'order') {
+                  return updateDoc(doc(db, "orders", item.id), { isPaid: true });
+              } else {
+                  return deleteDoc(doc(db, "expenses", item.id));
+              }
+          });
+          
+          await Promise.all(promises);
+          await fetchBoletaData();
+          loadData();
+          alert("Baixa concluída com sucesso!");
+      } catch (error) {
+          console.error(error);
+          alert("Erro ao processar baixa em lote.");
+      } finally {
+          setLoadingBoleta(false);
+      }
+  };
+
+  // --- HELPER: RENDERIZAR LISTA DE PRODUTOS ---
+  const renderItemDetails = (item: BoletaItem) => {
+      if (item.type === 'manual') {
+          return (
+              <div className="flex flex-col">
+                  <span className="font-bold text-slate-700 text-sm">{item.description}</span>
+                  <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded w-fit flex items-center gap-1 mt-0.5">
+                      <Tag size={10}/> Lançamento Manual
+                  </span>
+              </div>
+          );
+      }
+      
+      // Se for pedido, parseia o JSON de itens
+      try {
+          const itemsData = JSON.parse(item.originalData?.items || "[]");
+          return (
+              <div className="text-xs text-slate-600">
+                  {itemsData.map((i: any, idx: number) => (
+                      <div key={idx} className="leading-tight mb-0.5">
+                          <span className="font-bold text-slate-800">{i.quantity}x</span> {i.name}
+                      </div>
+                  ))}
+                  {item.description && <span className="text-[10px] text-gray-400 block mt-1 font-mono">#{item.description}</span>}
+              </div>
+          );
+      } catch (e) {
+          return <span className="text-xs text-red-400">Erro ao ler itens do pedido</span>;
+      }
   };
 
   const filteredDebts = groupedDebts.filter(d => 
@@ -215,7 +317,7 @@ export default function FinancePage() {
       d.userPhone.includes(searchTerm)
   );
 
-  // --- FUNÇÕES DO CRUD DE LANÇAMENTOS (EXISTENTE) ---
+  // --- CRUD Lançamentos ---
   const openModal = (record?: any) => {
       if (record) {
           setEditingId(record.id);
@@ -229,16 +331,13 @@ export default function FinancePage() {
           });
       } else {
           setEditingId(null);
-          setFormData({ 
-              description: "", amount: "", category: "insumos", type: "expense", 
-              date: new Date().toISOString().slice(0, 10), clientId: "" 
-          });
+          setFormData({ description: "", amount: "", category: "insumos", type: "expense", date: new Date().toISOString().slice(0, 10), clientId: "" });
       }
       setIsModalOpen(true);
   };
 
   const handleSave = async () => {
-      if (!formData.description || !formData.amount) return alert("Preencha os campos obrigatórios.");
+      if (!formData.description || !formData.amount) return alert("Preencha os campos.");
       setSaving(true);
       try {
           const payload = {
@@ -250,25 +349,18 @@ export default function FinancePage() {
               clientId: formData.clientId || null, 
               updatedAt: serverTimestamp()
           };
-
-          if (editingId) {
-              await updateDoc(doc(db, "expenses", editingId), payload);
-          } else {
-              await addDoc(collection(db, "expenses"), { ...payload, createdAt: serverTimestamp() });
-          }
-
+          if (editingId) await updateDoc(doc(db, "expenses", editingId), payload);
+          else await addDoc(collection(db, "expenses"), { ...payload, createdAt: serverTimestamp() });
+          
           setIsModalOpen(false);
           loadData(); 
-      } catch (e) { alert("Erro ao salvar"); console.error(e); }
+      } catch (e) { alert("Erro ao salvar"); }
       finally { setSaving(false); }
   };
 
   const handleDelete = async (id: string) => {
-      if(!confirm("Tem certeza que deseja excluir este lançamento?")) return;
-      try {
-          await deleteDoc(doc(db, "expenses", id));
-          loadData();
-      } catch (e) { alert("Erro ao excluir"); }
+      if(!confirm("Excluir lançamento?")) return;
+      try { await deleteDoc(doc(db, "expenses", id)); loadData(); } catch (e) { alert("Erro"); }
   };
 
   return (
@@ -288,7 +380,6 @@ export default function FinancePage() {
                 <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center"><TrendingUp size={20}/></div>
             </div>
             
-            {/* CARD A RECEBER (ATUALIZADO COM BOTÃO) */}
             <div className="bg-white p-6 rounded-2xl border border-orange-100 shadow-sm relative overflow-hidden">
                 <div className="flex justify-between items-start mb-3">
                     <div>
@@ -297,10 +388,7 @@ export default function FinancePage() {
                     </div>
                     <div className="w-10 h-10 rounded-full bg-orange-50 text-orange-500 flex items-center justify-center"><Clock size={20}/></div>
                 </div>
-                <button 
-                    onClick={fetchBoletaData}
-                    className="w-full bg-orange-100 text-orange-800 py-2 rounded-lg text-xs font-bold hover:bg-orange-200 transition flex items-center justify-center gap-2"
-                >
+                <button onClick={fetchBoletaData} className="w-full bg-orange-100 text-orange-800 py-2 rounded-lg text-xs font-bold hover:bg-orange-200 transition flex items-center justify-center gap-2">
                     <FileText size={14}/> Ver Boleta Geral
                 </button>
             </div>
@@ -316,15 +404,12 @@ export default function FinancePage() {
             </div>
         </div>
 
-        {/* Lista de Transações (Extrato) */}
+        {/* Lista */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                <h3 className="font-bold text-gray-700 flex items-center gap-2"><Filter size={16}/> Extrato</h3>
-                <button onClick={() => openModal()} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-slate-800 transition shadow-sm">
-                    <Plus size={16}/> Novo Lançamento
-                </button>
+                <h3 className="font-bold text-gray-700 flex items-center gap-2"><Filter size={16}/> Extrato (Mês Atual)</h3>
+                <button onClick={() => openModal()} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-slate-800 transition shadow-sm"><Plus size={16}/> Novo Lançamento</button>
             </div>
-
             {loading ? <div className="p-10 flex justify-center"><Loader2 className="animate-spin text-gray-400"/></div> : (
                 <div className="overflow-x-auto">
                     <table className="w-full text-left min-w-[700px]">
@@ -332,7 +417,7 @@ export default function FinancePage() {
                             <tr>
                                 <th className="p-4">Data</th>
                                 <th className="p-4">Descrição</th>
-                                <th className="p-4">Cliente (Vínculo)</th>
+                                <th className="p-4">Cliente</th>
                                 <th className="p-4">Categoria</th>
                                 <th className="p-4 text-right">Valor</th>
                                 <th className="p-4 w-20 text-center">Ações</th>
@@ -377,7 +462,7 @@ export default function FinancePage() {
             )}
         </div>
 
-        {/* MODAL EDITAR/CRIAR LANÇAMENTO */}
+        {/* MODAL EDITAR/CRIAR */}
         {isModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in">
                 <div className="bg-white w-full max-w-md rounded-2xl shadow-xl flex flex-col">
@@ -429,16 +514,15 @@ export default function FinancePage() {
             </div>
         )}
 
-        {/* --- MODAL DA BOLETA COMPLETA (NOVO) --- */}
+        {/* --- MODAL DA BOLETA COMPLETA (ATUALIZADO) --- */}
         {isBoletaOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 print:p-0 print:bg-white">
                 <div className="bg-white w-full max-w-4xl h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden print:h-auto print:rounded-none print:shadow-none print:w-full">
                     
-                    {/* Cabeçalho da Boleta */}
                     <div className="p-6 border-b flex justify-between items-center bg-slate-50 print:bg-white print:border-b-2">
                         <div>
                             <h2 className="text-xl font-bold text-slate-800">Relatório de Mensalistas (Boleta)</h2>
-                            <p className="text-sm text-slate-500 print:hidden">Contas em aberto agrupadas por cliente (Histórico Completo).</p>
+                            <p className="text-sm text-slate-500 print:hidden">Contas em aberto e lançamentos manuais.</p>
                             <p className="hidden print:block text-sm text-slate-500">Gerado em: {new Date().toLocaleDateString('pt-BR')}</p>
                         </div>
                         <div className="flex gap-2 print:hidden">
@@ -447,7 +531,6 @@ export default function FinancePage() {
                         </div>
                     </div>
 
-                    {/* Filtro */}
                     <div className="p-4 border-b print:hidden">
                         <div className="flex items-center gap-2 bg-gray-100 p-2 rounded-lg">
                             <Search size={18} className="text-gray-400"/>
@@ -455,39 +538,66 @@ export default function FinancePage() {
                         </div>
                     </div>
 
-                    {/* Conteúdo (Lista) */}
                     <div className="flex-1 overflow-y-auto p-6 space-y-8 print:overflow-visible">
                         {loadingBoleta ? <div className="text-center p-10"><Loader2 className="animate-spin inline"/> Carregando dados...</div> : filteredDebts.map((client, idx) => (
-                            <div key={idx} className="border rounded-xl p-4 break-inside-avoid print:border-gray-300">
-                                <div className="flex justify-between items-center mb-4 pb-2 border-b">
+                            <div key={idx} className="border rounded-xl p-4 break-inside-avoid print:border-gray-300 shadow-sm bg-white">
+                                
+                                {/* Cabeçalho do Cliente + Botão Baixar Todos */}
+                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 pb-2 border-b gap-4">
                                     <div>
                                         <h3 className="font-bold text-lg text-slate-800">{client.userName}</h3>
                                         <p className="text-sm text-slate-500 flex items-center gap-2"><Phone size={14}/> {client.userPhone}</p>
                                     </div>
-                                    <div className="text-right">
-                                        <p className="text-xs text-slate-500 uppercase font-bold">Total Devido</p>
-                                        <p className="text-xl font-bold text-red-600">{client.totalDebt.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+                                    <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
+                                        {/* BOTÃO BAIXAR TODOS */}
+                                        <button 
+                                            onClick={() => handleMarkAllAsPaid(client.items)}
+                                            className="print:hidden bg-emerald-100 text-emerald-800 hover:bg-emerald-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 transition"
+                                        >
+                                            <CheckCheck size={16}/> Baixar Todos
+                                        </button>
+                                        <div className="text-right">
+                                            <p className="text-xs text-slate-500 uppercase font-bold">Total Devido</p>
+                                            <p className={`text-xl font-bold ${client.totalDebt >= 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                                                {client.totalDebt.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                            </p>
+                                        </div>
                                     </div>
                                 </div>
+
                                 <table className="w-full text-sm text-left">
                                     <thead className="bg-gray-50 text-gray-500">
                                         <tr>
                                             <th className="p-2 rounded-l">Data</th>
-                                            <th className="p-2">Pedido #</th>
+                                            <th className="p-2">Itens / Descrição</th>
                                             <th className="p-2">Valor</th>
-                                            <th className="p-2 rounded-r print:hidden">Ação</th>
+                                            <th className="p-2 rounded-r print:hidden w-20 text-center">Ação</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y">
-                                        {client.orders.map(order => (
-                                            <tr key={order.id}>
-                                                <td className="p-2">{order.dateObj.toLocaleDateString('pt-BR')}</td>
-                                                <td className="p-2 font-mono text-xs">{order.shortId}</td>
-                                                <td className="p-2 font-bold">R$ {Number(order.total).toFixed(2)}</td>
-                                                <td className="p-2 print:hidden">
-                                                    <button onClick={() => handleMarkAsPaid(order.id)} className="text-emerald-600 hover:bg-emerald-50 p-1 rounded transition text-xs flex items-center gap-1 font-bold" title="Baixar">
-                                                        <CheckCircle size={14}/> Baixar
-                                                    </button>
+                                        {client.items.map(item => (
+                                            <tr key={item.id} className="hover:bg-gray-50">
+                                                <td className="p-2 align-top whitespace-nowrap">{item.dateObj.toLocaleDateString('pt-BR')}</td>
+                                                
+                                                {/* NOVA COLUNA: LISTA DE PRODUTOS OU DESCRIÇÃO MANUAL */}
+                                                <td className="p-2 align-top">
+                                                    {renderItemDetails(item)}
+                                                </td>
+
+                                                <td className={`p-2 align-top font-bold whitespace-nowrap ${item.amount >= 0 ? 'text-slate-700' : 'text-emerald-600'}`}>
+                                                    R$ {Number(item.amount).toFixed(2)}
+                                                </td>
+                                                
+                                                <td className="p-2 align-top text-center print:hidden">
+                                                    {item.type === 'order' ? (
+                                                        <button onClick={() => handleMarkAsPaid(item.id)} className="text-emerald-600 hover:bg-emerald-50 p-1 rounded transition text-xs flex items-center justify-center gap-1 font-bold w-full" title="Baixar">
+                                                            <CheckCircle size={14}/> Baixar
+                                                        </button>
+                                                    ) : (
+                                                        <button onClick={() => handleDeleteManual(item.id)} className="text-red-400 hover:bg-red-50 p-1 rounded transition text-xs flex items-center justify-center gap-1 w-full" title="Excluir Lançamento">
+                                                            <Trash2 size={14}/> Excluir
+                                                        </button>
+                                                    )}
                                                 </td>
                                             </tr>
                                         ))}
