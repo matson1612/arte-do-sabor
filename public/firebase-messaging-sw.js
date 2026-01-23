@@ -14,40 +14,34 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// --- CORREÇÃO 1: FIM DA DUPLICIDADE ---
-// Removemos o "messaging.onBackgroundMessage" que forçava a exibição manual.
-// O Firebase SDK já exibe automaticamente quando o payload tem "notification".
-
-// --- CORREÇÃO 2: CLIQUE NA NOTIFICAÇÃO ---
+// Evento de Clique na Notificação
 self.addEventListener('notificationclick', function(event) {
-  console.log('Notificação clicada', event);
+  console.log('[SW] Notificação clicada');
   
-  // 1. Fecha a notificação no celular
+  // 1. Fecha a notificação
   event.notification.close();
 
-  // 2. Define para onde vai (Home ou link específico)
-  // Tenta pegar o link enviado no "data", se não tiver, vai para a raiz "/"
-  const urlToOpen = event.notification.data?.url || '/';
+  // 2. Define a URL de destino (padrão para a raiz se não vier nada)
+  // Tenta pegar do payload 'data', senão usa a origem do site
+  const targetUrl = (event.notification.data && event.notification.data.url) ? event.notification.data.url : self.registration.scope;
 
-  // 3. Abre o app ou foca na aba aberta
+  // 3. Tenta focar numa aba aberta ou abrir uma nova
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
-      // Se já houver uma aba aberta, foca nela
+      // Se houver aba aberta do mesmo site, foca nela e navega
       for (var i = 0; i < clientList.length; i++) {
         var client = clientList[i];
-        // Verifica se a aba pertence ao mesmo site
+        // Verifica se a aba é do nosso site
         if (client.url.indexOf(self.registration.scope) > -1 && 'focus' in client) {
-          return client.focus().then(focusedClient => {
-             // Opcional: Navegar para a URL específica se não estiver nela
-             if (focusedClient && 'navigate' in focusedClient) {
-                 return focusedClient.navigate(urlToOpen);
-             }
+          return client.focus().then(c => {
+             // Redireciona para a URL certa (ex: /promo) se suportado
+             if(c && 'navigate' in c) return c.navigate(targetUrl);
           });
         }
       }
       // Se não tiver aba aberta, abre uma nova
       if (clients.openWindow) {
-        return clients.openWindow(urlToOpen);
+        return clients.openWindow(targetUrl);
       }
     })
   );

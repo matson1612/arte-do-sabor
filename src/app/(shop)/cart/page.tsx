@@ -320,12 +320,20 @@ export default function CartPage() {
                 }
             }
 
+            // CORREÇÃO: Garante que o campo address não seja undefined
+            // Se for conta_aberta ou retirada, o endereço é null.
+            // Se for delivery padrão, tenta pegar selectedAddr, se não tiver, vai null (e não undefined)
+            const finalAddress = (paymentMethod === 'conta_aberta' || deliveryMethod === 'pickup') 
+                ? null 
+                : (selectedAddr || null);
+
             const newOrderRef = doc(collection(db, "orders"));
             transaction.set(newOrderRef, {
                 shortId: shortId, userId: user.uid, userName: profile?.name || user.displayName, userPhone: finalPhone,
                 items: JSON.stringify(items), total: finalTotal, status: 'em_aberto', paymentMethod: paymentMethod,
                 deliveryMethod: deliveryMethod, createdAt: serverTimestamp(), shippingPrice: shippingPrice,
-                address: deliveryMethod === 'delivery' ? selectedAddr : null, isPaid: false 
+                address: finalAddress, // <--- Aqui estava o erro (agora corrigido)
+                isPaid: false 
             });
         });
 
@@ -337,13 +345,17 @@ export default function CartPage() {
         msg += `--------------------------------\n`;
         items.forEach(i => msg += `${i.quantity}x ${i.name}\n`);
         
-        if (deliveryMethod === 'delivery') {
+        if (deliveryMethod === 'delivery' && paymentMethod !== 'conta_aberta') {
             const addr = savedAddresses.find(a => a.id === selectedAddressId);
             msg += `📦 *Entrega (${addr?.regionType === 'plano_diretor' ? 'Plano Diretor' : addr?.sectorName})*\n`;
             msg += `📍 ${addr?.street}, ${addr?.number} - ${addr?.district}\n`;
             if(addr?.complement) msg += `Obs: ${addr.complement}\n`;
             if(addr?.location) msg += `🗺️ Maps: http://googleusercontent.com/maps.google.com/?q=${addr.location.lat},${addr.location.lng}\n`;
-        } else msg += `🏪 *Retirada no Balcão*\n`;
+        } else if (paymentMethod === 'conta_aberta') {
+            msg += `📄 *Pagamento Mensalista (Sem Entrega/Frete)*\n`;
+        } else {
+            msg += `🏪 *Retirada no Balcão*\n`;
+        }
         
         msg += `💳 Pagamento: ${payText}\n📞: ${finalPhone}\n\n*TOTAL: R$ ${finalTotal.toFixed(2)}*`;
 
