@@ -1,3 +1,4 @@
+// src/app/(shop)/encomendas/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -6,7 +7,7 @@ import { collection, getDocs, query, orderBy, doc, getDoc } from "firebase/fires
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { Plus, Minus, Loader2, ImageOff, X, CheckSquare, MessageSquare } from "lucide-react";
-import { Product, ComplementGroup, Option, StoreSettings } from "@/types";
+import { Product, ComplementGroup, Option, StoreSettings, Category } from "@/types";
 import HeroCarousel from "@/components/HeroCarousel";
 
 export default function EncomendasPage() {
@@ -14,6 +15,7 @@ export default function EncomendasPage() {
   const { profile } = useAuth();
   
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
   
@@ -23,13 +25,13 @@ export default function EncomendasPage() {
   const [observation, setObservation] = useState("");
   const [selectedOptions, setSelectedOptions] = useState<Record<string, Option[]>>({});
 
-  // Carregar Dados
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [productsSnap, groupsSnap, settingsSnap] = await Promise.all([
+        const [productsSnap, groupsSnap, catsSnap, settingsSnap] = await Promise.all([
             getDocs(query(collection(db, "products"), orderBy("name"))),
             getDocs(collection(db, "complement_groups")),
+            getDocs(query(collection(db, "categories"), orderBy("order"))),
             getDoc(doc(db, "store_settings", "config"))
         ]);
 
@@ -41,7 +43,6 @@ export default function EncomendasPage() {
         const groupsMap: Record<string, ComplementGroup> = {};
         groupsSnap.docs.forEach(doc => {
             const groupData = doc.data() as ComplementGroup;
-            // Hidratar opções linkadas
             const hydratedOptions = groupData.options?.map(opt => {
                 if (opt.linkedProductId && productMap.has(opt.linkedProductId)) {
                     const linkedProd = productMap.get(opt.linkedProductId)!;
@@ -70,12 +71,30 @@ export default function EncomendasPage() {
             });
 
         setProducts(items);
+        setCategories(catsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Category)));
+
       } catch (error) { console.error(error); } finally { setLoading(false); }
     };
     fetchData();
   }, []);
 
-  // Helpers de Preço
+  // Agrupamento por Categoria
+  const groupedProducts: Record<string, Product[]> = {};
+  categories.forEach(cat => groupedProducts[cat.id] = []);
+  groupedProducts['uncategorized'] = [];
+
+  products.forEach(p => {
+      const catId = p.category || 'uncategorized';
+      if (groupedProducts[catId]) groupedProducts[catId].push(p); 
+      else groupedProducts['uncategorized'].push(p);
+  });
+
+  const catsToRender = [...categories, { id: 'uncategorized', name: 'Geral', order: 999 }]
+      .filter(c => groupedProducts[c.id] && groupedProducts[c.id].length > 0);
+
+  // --- Helpers de Preço ---
+  
+  // 1. Preço de Exibição no Card (A partir de...)
   const getPrice = (item: Product) => {
     if (profile?.clientType === 'reseller' && item.priceReseller && item.priceReseller > 0) return item.priceReseller;
     if (profile?.clientType === 'monthly' && item.pricePostpaid && item.pricePostpaid > 0) return item.pricePostpaid;
@@ -88,14 +107,16 @@ export default function EncomendasPage() {
       return opt.priceAdd;
   };
 
+  // 2. Preço Real do Pedido (Soma APENAS os complementos)
   const calculateTotal = () => {
     if (!selectedProduct) return 0;
-    let total = getPrice(selectedProduct);
+    
+    let total = 0; // <--- ALTERAÇÃO AQUI: Começa em 0, ignorando o preço base do produto pai.
+    
     Object.values(selectedOptions).flat().forEach(opt => total += getOptionPrice(opt));
     return total * quantity;
   };
 
-  // Funções do Modal
   const openModal = (product: Product) => { setSelectedProduct(product); setQuantity(1); setObservation(""); setSelectedOptions({}); };
 
   const toggleOption = (group: ComplementGroup, option: Option) => {
@@ -134,44 +155,43 @@ export default function EncomendasPage() {
     <div className="pb-24">
       <div className="max-w-6xl mx-auto px-4 md:px-6 pt-4 space-y-8">
         
-        {/* CARROSSEL CORRIGIDO */}
         <div className="rounded-2xl overflow-hidden shadow-sm">
             <HeroCarousel products={products} onProductClick={openModal} />
         </div>
 
-        {/* REMOVI O BANNER "CATÁLOGO DE ENCOMENDAS" QUE FICAVA AQUI */}
-
-        <section>
-            <div className="flex items-center gap-4 mb-6">
-                <h3 className="text-2xl font-bold text-slate-800 capitalize tracking-tight">Encomendas Disponíveis</h3>
-                <div className="h-[1px] flex-1 bg-slate-200"></div>
-            </div>
-            
-            <div className="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-            {products.map((product) => (
-                <div key={product.id} onClick={() => openModal(product)} className="group bg-white rounded-2xl p-3 shadow-sm hover:shadow-md border border-slate-100 relative overflow-hidden flex gap-3 cursor-pointer transition-all active:scale-[0.98]">
-                    <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden flex-shrink-0 bg-slate-100 relative">
-                        {product.imageUrl ? <img src={product.imageUrl} className="w-full h-full object-cover" /> : <ImageOff className="m-auto mt-8 text-slate-300" size={24} />}
-                    </div>
-                    <div className="flex-1 flex flex-col justify-between py-0.5 min-w-0">
-                        <div>
-                            <h4 className="font-bold text-slate-800 text-sm sm:text-base leading-tight line-clamp-2 mb-1">{product.name}</h4>
-                            <p className="text-[11px] sm:text-xs text-slate-500 line-clamp-2 leading-relaxed">{product.description}</p>
-                        </div>
-                        <div className="flex justify-between items-end mt-2 gap-2">
-                            <div className="flex flex-col min-w-0">
-                                <span className="text-[10px] text-slate-400 font-bold uppercase truncate">A partir de</span>
-                                <span className="font-bold text-sm sm:text-base text-emerald-600">{getPrice(product).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                            </div>
-                            <button className="bg-slate-900 text-white w-8 h-8 rounded-full flex items-center justify-center shadow hover:bg-pink-600 transition-colors flex-shrink-0">
-                                <Plus size={16} />
-                            </button>
-                        </div>
-                    </div>
+        {catsToRender.map((category) => (
+            <section key={category.id}>
+                <div className="flex items-center gap-4 mb-6">
+                    <h3 className="text-2xl font-bold text-slate-800 capitalize tracking-tight">{category.name}</h3>
+                    <div className="h-[1px] flex-1 bg-slate-200"></div>
                 </div>
-            ))}
-            </div>
-        </section>
+                
+                <div className="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+                    {groupedProducts[category.id].map((product) => (
+                        <div key={product.id} onClick={() => openModal(product)} className="group bg-white rounded-2xl p-3 shadow-sm hover:shadow-md border border-slate-100 relative overflow-hidden flex gap-3 cursor-pointer transition-all active:scale-[0.98]">
+                            <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden flex-shrink-0 bg-slate-100 relative">
+                                {product.imageUrl ? <img src={product.imageUrl} className="w-full h-full object-cover" /> : <ImageOff className="m-auto mt-8 text-slate-300" size={24} />}
+                            </div>
+                            <div className="flex-1 flex flex-col justify-between py-0.5 min-w-0">
+                                <div>
+                                    <h4 className="font-bold text-slate-800 text-sm sm:text-base leading-tight line-clamp-2 mb-1">{product.name}</h4>
+                                    <p className="text-[11px] sm:text-xs text-slate-500 line-clamp-2 leading-relaxed">{product.description}</p>
+                                </div>
+                                <div className="flex justify-between items-end mt-2 gap-2">
+                                    <div className="flex flex-col min-w-0">
+                                        <span className="text-[10px] text-slate-400 font-bold uppercase truncate">A partir de</span>
+                                        <span className="font-bold text-sm sm:text-base text-emerald-600">{getPrice(product).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                    </div>
+                                    <button className="bg-slate-900 text-white w-8 h-8 rounded-full flex items-center justify-center shadow hover:bg-pink-600 transition-colors flex-shrink-0">
+                                        <Plus size={16} />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </section>
+        ))}
       </div>
 
       {/* MODAL DE PRODUTO */}
