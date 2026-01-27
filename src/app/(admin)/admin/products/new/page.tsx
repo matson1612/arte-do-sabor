@@ -15,7 +15,7 @@ export default function NewProductPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [allMasterGroups, setAllMasterGroups] = useState<ComplementGroup[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]); // Lista de categorias
+  const [categories, setCategories] = useState<Category[]>([]);
   
   const [manageStock, setManageStock] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -25,15 +25,16 @@ export default function NewProductPage() {
 
   const [formData, setFormData] = useState<Partial<Product>>({
     name: "", description: "", 
-    basePrice: 0, pricePostpaid: 0, priceReseller: 0, // Campos de preço
+    basePrice: 0, pricePostpaid: 0, priceReseller: 0,
     imageUrl: "", 
-    category: "", // ID da categoria
+    category: "", 
     isAvailable: true, availableStandard: true, availablePostpaid: true, availableReseller: true,
     stock: null, complementGroupIds: [],
     salesChannel: 'delivery',
     gallery: [], videoUrl: "", isFeatured: false
   });
 
+  // isShowcase apenas para esconder ESTOQUE e COMPLEMENTOS se quiser, mas liberamos PREÇO
   const isShowcase = formData.salesChannel === 'encomenda' || formData.salesChannel === 'evento';
 
   useEffect(() => {
@@ -44,11 +45,8 @@ export default function NewProductPage() {
                 getDocs(query(collection(db, "categories"), orderBy("order")))
             ]);
             setAllMasterGroups(groupsData);
-            
             const cats = catsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Category));
             setCategories(cats);
-            
-            // Define categoria padrão se houver
             if (cats.length > 0) setFormData(prev => ({ ...prev, category: cats[0].id }));
         } catch (e) { console.error(e); }
     };
@@ -79,19 +77,18 @@ export default function NewProductPage() {
       const payload = {
         name: formData.name!,
         description: formData.description || "",
-        basePrice: isShowcase ? 0 : (Number(formData.basePrice) || 0),
-        pricePostpaid: isShowcase ? 0 : (Number(formData.pricePostpaid) || 0),
-        priceReseller: isShowcase ? 0 : (Number(formData.priceReseller) || 0),
+        // CORREÇÃO: Salva o preço mesmo se for Encomenda/Evento
+        basePrice: Number(formData.basePrice) || 0,
+        pricePostpaid: Number(formData.pricePostpaid) || 0,
+        priceReseller: Number(formData.priceReseller) || 0,
         imageUrl: formData.imageUrl || "",
-        
         category: formData.category || (categories[0]?.id || "geral"),
-        
         isAvailable: formData.isAvailable ?? true,
         availableStandard: true,
         availablePostpaid: true,
         availableReseller: true,
         stock: (isShowcase || !manageStock) ? null : (Number(formData.stock) || 0),
-        complementGroupIds: isShowcase ? [] : (formData.complementGroupIds || []),
+        complementGroupIds: formData.complementGroupIds || [], // Permite complementos em encomendas se quiser
         salesChannel: formData.salesChannel || 'delivery',
         gallery: formData.gallery || [],
         videoUrl: formData.videoUrl || "",
@@ -132,13 +129,23 @@ export default function NewProductPage() {
 
                 <input placeholder="Nome do Produto" required className="w-full p-3 border rounded" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})}/>
                 
-                {!isShowcase && (
-                    <div className="grid grid-cols-3 gap-4 bg-gray-50 p-4 rounded border animate-in fade-in">
-                        <div><label className="text-xs font-bold text-green-700 uppercase mb-1 block">R$ Padrão</label><input type="number" step="0.01" required className="w-full p-3 border rounded border-green-200" value={formData.basePrice} onChange={e => setFormData({...formData, basePrice: parseFloat(e.target.value)})}/></div>
-                        <div><label className="text-xs font-bold text-purple-700 uppercase mb-1 block">R$ Mensalista</label><input type="number" step="0.01" className="w-full p-3 border rounded border-purple-200" value={formData.pricePostpaid || ''} onChange={e => setFormData({...formData, pricePostpaid: parseFloat(e.target.value)})}/></div>
-                        <div><label className="text-xs font-bold text-orange-700 uppercase mb-1 block">R$ Revenda</label><input type="number" step="0.01" className="w-full p-3 border rounded border-orange-200" value={formData.priceReseller || ''} onChange={e => setFormData({...formData, priceReseller: parseFloat(e.target.value)})}/></div>
+                {/* PREÇOS - Agora sempre visível */}
+                <div className="grid grid-cols-3 gap-4 bg-gray-50 p-4 rounded border animate-in fade-in">
+                    <div>
+                        <label className="text-xs font-bold text-green-700 uppercase mb-1 block">
+                            {isShowcase ? 'A partir de (R$)' : 'R$ Padrão'}
+                        </label>
+                        <input type="number" step="0.01" required className="w-full p-3 border rounded border-green-200" value={formData.basePrice} onChange={e => setFormData({...formData, basePrice: parseFloat(e.target.value)})}/>
                     </div>
-                )}
+                    <div>
+                        <label className="text-xs font-bold text-purple-700 uppercase mb-1 block">R$ Mensalista</label>
+                        <input type="number" step="0.01" className="w-full p-3 border rounded border-purple-200" value={formData.pricePostpaid || ''} onChange={e => setFormData({...formData, pricePostpaid: parseFloat(e.target.value)})}/>
+                    </div>
+                    <div>
+                        <label className="text-xs font-bold text-orange-700 uppercase mb-1 block">R$ Revenda</label>
+                        <input type="number" step="0.01" className="w-full p-3 border rounded border-orange-200" value={formData.priceReseller || ''} onChange={e => setFormData({...formData, priceReseller: parseFloat(e.target.value)})}/>
+                    </div>
+                </div>
 
                 <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -172,12 +179,11 @@ export default function NewProductPage() {
                 )}
             </section>
 
-            {!isShowcase && (
-                <section className="bg-white p-6 rounded border">
-                    <div className="flex justify-between mb-4"><h2 className="font-bold flex gap-2"><Layers/> Complementos</h2><button type="button" onClick={quickGroup} className="text-pink-600 font-bold text-sm">+ Criar Rápido</button></div>
-                    <div className="grid md:grid-cols-2 gap-3">{allMasterGroups.map(g => { const sel = formData.complementGroupIds?.includes(g.id); return <div key={g.id} onClick={() => { const curr = formData.complementGroupIds || []; setFormData({...formData, complementGroupIds: sel ? curr.filter(i => i !== g.id) : [...curr, g.id]}); }} className={`p-3 border rounded cursor-pointer flex gap-3 items-center ${sel ? 'border-pink-500 bg-pink-50' : ''}`}><div className={`w-4 h-4 border rounded flex items-center justify-center ${sel ? 'bg-pink-600 border-pink-600 text-white' : 'bg-white'}`}>{sel && "✓"}</div><div className="flex-1"><div className="font-bold text-sm">{g.title}</div></div></div> })}</div>
-                </section>
-            )}
+            {/* Complementos disponíveis para todos se quiser, mas escondendo para simplificar se for encomenda, ou pode liberar */}
+            <section className="bg-white p-6 rounded border">
+                <div className="flex justify-between mb-4"><h2 className="font-bold flex gap-2"><Layers/> Complementos</h2><button type="button" onClick={quickGroup} className="text-pink-600 font-bold text-sm">+ Criar Rápido</button></div>
+                <div className="grid md:grid-cols-2 gap-3">{allMasterGroups.map(g => { const sel = formData.complementGroupIds?.includes(g.id); return <div key={g.id} onClick={() => { const curr = formData.complementGroupIds || []; setFormData({...formData, complementGroupIds: sel ? curr.filter(i => i !== g.id) : [...curr, g.id]}); }} className={`p-3 border rounded cursor-pointer flex gap-3 items-center ${sel ? 'border-pink-500 bg-pink-50' : ''}`}><div className={`w-4 h-4 border rounded flex items-center justify-center ${sel ? 'bg-pink-600 border-pink-600 text-white' : 'bg-white'}`}>{sel && "✓"}</div><div className="flex-1"><div className="font-bold text-sm">{g.title}</div></div></div> })}</div>
+            </section>
         </div>
 
         <div className="space-y-6">

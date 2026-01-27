@@ -105,6 +105,9 @@ export default function EditProductPage({ params }: EditPageProps) {
       const payload = { 
           ...formData, 
           category: finalCategory,
+          // Garante que salve os preços
+          basePrice: Number(formData.basePrice) || 0,
+          pricePostpaid: Number(formData.pricePostpaid) || 0,
           priceReseller: Number(formData.priceReseller) || 0,
           stock: (isShowcase || !manageStock) ? null : (formData.stock ?? 0)
       };
@@ -201,22 +204,23 @@ export default function EditProductPage({ params }: EditPageProps) {
 
                 <input required className="w-full p-3 border rounded" placeholder="Nome" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
                 
-                {!isShowcase && (
-                    <div className="grid grid-cols-3 gap-4 bg-gray-50 p-4 rounded border">
-                        <div>
-                            <label className="text-xs font-bold text-green-700 uppercase mb-1 block">R$ Padrão</label>
-                            <input type="number" step="0.01" required className="w-full p-3 border rounded border-green-200" value={formData.basePrice} onChange={e => setFormData({...formData, basePrice: parseFloat(e.target.value)})} />
-                        </div>
-                        <div>
-                            <label className="text-xs font-bold text-purple-700 uppercase mb-1 block">R$ Mensalista</label>
-                            <input type="number" step="0.01" className="w-full p-3 border rounded border-purple-200" placeholder="Opcional" value={formData.pricePostpaid || ''} onChange={e => setFormData({...formData, pricePostpaid: parseFloat(e.target.value)})} />
-                        </div>
-                        <div>
-                            <label className="text-xs font-bold text-orange-700 uppercase mb-1 block">R$ Revenda</label>
-                            <input type="number" step="0.01" className="w-full p-3 border rounded border-orange-200" placeholder="Opcional" value={formData.priceReseller || ''} onChange={e => setFormData({...formData, priceReseller: parseFloat(e.target.value)})} />
-                        </div>
+                {/* PREÇOS SEMPRE VISÍVEIS */}
+                <div className="grid grid-cols-3 gap-4 bg-gray-50 p-4 rounded border">
+                    <div>
+                        <label className="text-xs font-bold text-green-700 uppercase mb-1 block">
+                            {isShowcase ? 'A partir de (R$)' : 'R$ Padrão'}
+                        </label>
+                        <input type="number" step="0.01" required className="w-full p-3 border rounded border-green-200" value={formData.basePrice} onChange={e => setFormData({...formData, basePrice: parseFloat(e.target.value)})} />
                     </div>
-                )}
+                    <div>
+                        <label className="text-xs font-bold text-purple-700 uppercase mb-1 block">R$ Mensalista</label>
+                        <input type="number" step="0.01" className="w-full p-3 border rounded border-purple-200" placeholder="Opcional" value={formData.pricePostpaid || ''} onChange={e => setFormData({...formData, pricePostpaid: parseFloat(e.target.value)})} />
+                    </div>
+                    <div>
+                        <label className="text-xs font-bold text-orange-700 uppercase mb-1 block">R$ Revenda</label>
+                        <input type="number" step="0.01" className="w-full p-3 border rounded border-orange-200" placeholder="Opcional" value={formData.priceReseller || ''} onChange={e => setFormData({...formData, priceReseller: parseFloat(e.target.value)})} />
+                    </div>
+                </div>
 
                 <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -248,35 +252,33 @@ export default function EditProductPage({ params }: EditPageProps) {
                 )}
             </section>
 
-            {!isShowcase && (
-                <section className="bg-white p-6 rounded border">
-                    <div className="flex justify-between items-center mb-4 border-b pb-2">
-                        <h2 className="font-bold flex items-center gap-2"><Layers size={18} /> Complementos</h2>
-                        <button type="button" onClick={() => handleOpenModal()} className="text-sm text-pink-600 font-bold hover:underline">+ Criar Novo Grupo</button>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {allMasterGroups.map((group) => {
-                            const isSelected = formData.complementGroupIds?.includes(group.id);
-                            return (
-                                <div key={group.id} className={`p-3 rounded border flex items-center gap-3 transition-all ${isSelected ? "border-pink-500 bg-pink-50" : "hover:border-gray-300"}`}>
-                                    <div onClick={() => {
-                                        const curr = formData.complementGroupIds || [];
-                                        const newIds = isSelected ? curr.filter(id => id !== group.id) : [...curr, group.id];
-                                        setFormData({...formData, complementGroupIds: newIds});
-                                    }} className={`w-5 h-5 rounded border flex items-center justify-center cursor-pointer ${isSelected ? "bg-pink-600 border-pink-600 text-white" : "bg-white"}`}>
-                                        {isSelected && <span className="text-xs">✓</span>}
-                                    </div>
-                                    <div className="flex-1 cursor-pointer">
-                                        <h3 className="font-bold text-sm">{group.title}</h3>
-                                        <p className="text-xs text-gray-500">{group.options.length} opções</p>
-                                    </div>
-                                    <button type="button" onClick={() => handleOpenModal(group.id)} className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Editar Itens"><Pencil size={14} /></button>
+            <section className="bg-white p-6 rounded border">
+                <div className="flex justify-between items-center mb-4 border-b pb-2">
+                    <h2 className="font-bold flex items-center gap-2"><Layers size={18} /> Complementos</h2>
+                    <button type="button" onClick={() => handleOpenModal()} className="text-sm text-pink-600 font-bold hover:underline">+ Criar Novo Grupo</button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {allMasterGroups.map((group) => {
+                        const isSelected = formData.complementGroupIds?.includes(group.id);
+                        return (
+                            <div key={group.id} className={`p-3 rounded border flex items-center gap-3 transition-all ${isSelected ? "border-pink-500 bg-pink-50" : "hover:border-gray-300"}`}>
+                                <div onClick={() => {
+                                    const curr = formData.complementGroupIds || [];
+                                    const newIds = isSelected ? curr.filter(id => id !== group.id) : [...curr, group.id];
+                                    setFormData({...formData, complementGroupIds: newIds});
+                                }} className={`w-5 h-5 rounded border flex items-center justify-center cursor-pointer ${isSelected ? "bg-pink-600 border-pink-600 text-white" : "bg-white"}`}>
+                                    {isSelected && <span className="text-xs">✓</span>}
                                 </div>
-                            );
-                        })}
-                    </div>
-                </section>
-            )}
+                                <div className="flex-1 cursor-pointer">
+                                    <h3 className="font-bold text-sm">{group.title}</h3>
+                                    <p className="text-xs text-gray-500">{group.options.length} opções</p>
+                                </div>
+                                <button type="button" onClick={() => handleOpenModal(group.id)} className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="Editar Itens"><Pencil size={14} /></button>
+                            </div>
+                        );
+                    })}
+                </div>
+            </section>
         </div>
 
         <div className="space-y-6">
