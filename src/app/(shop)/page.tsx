@@ -1,3 +1,4 @@
+// src/app/(shop)/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -88,8 +89,7 @@ export default function ShopHome() {
         }
         if (option.stock !== null && currentQty >= option.stock) return alert("Estoque limite atingido.");
         setSelectedOptions({ ...selectedOptions, [group.id]: [...currentList, option] });
-    } 
-    else {
+    } else {
         if (currentQty === 0) return;
         const indexToRemove = currentList.findIndex(o => o.id === option.id);
         if (indexToRemove > -1) {
@@ -100,9 +100,7 @@ export default function ShopHome() {
     }
   };
 
-  const getQty = (groupId: string, optionId: string) => {
-      return selectedOptions[groupId]?.filter(o => o.id === optionId).length || 0;
-  };
+  const getQty = (groupId: string, optionId: string) => selectedOptions[groupId]?.filter(o => o.id === optionId).length || 0;
 
   const calculateTotal = () => {
     if (!selectedProduct) return 0;
@@ -129,14 +127,9 @@ export default function ShopHome() {
             acc[opt.name] = (acc[opt.name] || 0) + 1;
             return acc;
         }, {} as Record<string, number>);
-        
-        const optString = Object.entries(groupedNames)
-            .map(([name, qtd]) => qtd > 1 ? `${qtd}x ${name}` : name)
-            .join(', ');
-            
+        const optString = Object.entries(groupedNames).map(([name, qtd]) => qtd > 1 ? `${qtd}x ${name}` : name).join(', ');
         customName += ` (+ ${optString})`; 
     }
-    
     if (observation.trim()) customName += ` [Obs: ${observation}]`;
     addToCart({ ...selectedProduct, name: customName, price: calculateTotal() / quantity, selectedOptions: selectedOptions }, quantity);
     setSelectedProduct(null);
@@ -199,28 +192,28 @@ export default function ShopHome() {
           </section>
       ))}
       
-      {/* MODAL AJUSTADO (CARD FLUTUANTE) */}
+      {/* MODAL AJUSTADO: Centralizado e com Margens Seguras */}
       {selectedProduct && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
-            {/* Fundo clicável para fechar */}
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in duration-200">
+            {/* Área de Clique para Fechar */}
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
             
-            {/* CARD */}
-            <div className="relative bg-white w-full max-w-md max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* O CARD */}
+            <div className="relative bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" style={{ maxHeight: '80dvh' }}>
                 
                 {/* Botão Fechar */}
-                <button onClick={() => setSelectedProduct(null)} className="absolute top-3 right-3 z-20 bg-white/80 backdrop-blur text-stone-800 p-2 rounded-full hover:bg-white shadow-sm transition"><X size={20}/></button>
+                <button onClick={() => setSelectedProduct(null)} className="absolute top-3 right-3 z-20 bg-white/90 backdrop-blur text-stone-800 p-2 rounded-full hover:bg-white shadow-md transition"><X size={20}/></button>
 
-                {/* Imagem (Menor altura) */}
-                <div className="h-40 bg-stone-100 relative flex-shrink-0">
+                {/* Imagem (Altura Fixa Menor) */}
+                <div className="h-44 bg-stone-100 relative flex-shrink-0">
                     {selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-stone-300"><ImageOff size={40}/></div>}
                 </div>
 
-                {/* Corpo Scrollável */}
+                {/* Conteúdo com Scroll */}
                 <div className="p-5 overflow-y-auto flex-1 space-y-5">
                     <div>
                         <h2 className="text-xl font-bold text-stone-800 leading-tight">{selectedProduct.name}</h2>
-                        <p className="text-sm text-stone-500 mt-1">{selectedProduct.description}</p>
+                        <p className="text-sm text-stone-500 mt-1 leading-relaxed">{selectedProduct.description}</p>
                     </div>
 
                     {selectedProduct.fullGroups?.map(group => (
@@ -234,16 +227,16 @@ export default function ShopHome() {
                                     const optQty = getQty(group.id, opt.id);
                                     const optOutOfStock = opt.stock !== null && opt.stock <= 0; 
                                     return (
-                                        <div key={opt.id} className={`flex justify-between items-center p-2 rounded-lg border ${optOutOfStock ? 'opacity-50 bg-gray-50' : optQty > 0 ? 'border-pink-500 bg-pink-50/30' : 'border-gray-100 bg-white'}`}>
+                                        <div key={opt.id} className={`flex justify-between items-center p-2 rounded-lg border transition-colors ${optOutOfStock ? 'opacity-50 bg-gray-50' : optQty > 0 ? 'border-pink-500 bg-pink-50/30' : 'border-gray-100 bg-white'}`}>
                                             <div className="flex-1 pr-2">
                                                 <span className="text-sm font-bold text-stone-700 block">{opt.name} {optOutOfStock && '(Esgotado)'}</span>
                                                 {getOptionPrice(opt) > 0 && <span className="text-xs text-emerald-600 font-bold">+ R$ {getOptionPrice(opt).toFixed(2)}</span>}
                                             </div>
                                             {!optOutOfStock && (
                                                 <div className="flex items-center gap-2 bg-white border border-gray-200 rounded px-1 py-0.5 shadow-sm">
-                                                    <button onClick={(e) => {e.stopPropagation(); updateOptionQty(group, opt, -1)}} className={`w-6 h-6 flex items-center justify-center rounded hover:bg-gray-100 ${optQty === 0 ? 'text-gray-300' : 'text-red-500'}`} disabled={optQty === 0}><Minus size={14}/></button>
-                                                    <span className={`text-sm font-bold w-4 text-center ${optQty > 0 ? 'text-stone-800' : 'text-gray-300'}`}>{optQty}</span>
-                                                    <button onClick={(e) => {e.stopPropagation(); updateOptionQty(group, opt, 1)}} className="w-6 h-6 flex items-center justify-center rounded hover:bg-gray-100 text-green-600"><Plus size={14}/></button>
+                                                    <button onClick={(e) => {e.stopPropagation(); updateOptionQty(group, opt, -1)}} className={`w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100 ${optQty === 0 ? 'text-gray-300' : 'text-red-500'}`} disabled={optQty === 0}><Minus size={14}/></button>
+                                                    <span className={`text-sm font-bold w-5 text-center ${optQty > 0 ? 'text-stone-800' : 'text-gray-300'}`}>{optQty}</span>
+                                                    <button onClick={(e) => {e.stopPropagation(); updateOptionQty(group, opt, 1)}} className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100 text-green-600"><Plus size={14}/></button>
                                                 </div>
                                             )}
                                         </div>
@@ -261,12 +254,12 @@ export default function ShopHome() {
 
                 {/* Footer Fixo */}
                 <div className="p-4 bg-gray-50 border-t border-gray-200 flex items-center gap-3 flex-shrink-0">
-                    <div className="flex items-center bg-white border rounded-lg h-10 px-1 shadow-sm">
-                        <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="w-8 h-full flex items-center justify-center hover:text-pink-600"><Minus size={16}/></button>
-                        <span className="w-6 text-center font-bold text-sm text-stone-800">{quantity}</span>
-                        <button onClick={() => setQuantity(q => q + 1)} className="w-8 h-full flex items-center justify-center hover:text-pink-600"><Plus size={16}/></button>
+                    <div className="flex items-center bg-white border rounded-lg h-11 px-1 shadow-sm">
+                        <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="w-9 h-full flex items-center justify-center hover:text-pink-600 transition"><Minus size={18}/></button>
+                        <span className="w-8 text-center font-bold text-lg text-stone-800">{quantity}</span>
+                        <button onClick={() => setQuantity(q => q + 1)} className="w-9 h-full flex items-center justify-center hover:text-pink-600 transition"><Plus size={18}/></button>
                     </div>
-                    <button onClick={handleAddToCart} disabled={isStoreClosed || (selectedProduct.stock !== null && selectedProduct.stock <= 0)} className={`flex-1 font-bold h-10 rounded-lg flex justify-between items-center px-4 shadow-md text-sm transition-all active:scale-95 ${isStoreClosed || (selectedProduct.stock !== null && selectedProduct.stock <= 0) ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-stone-900 text-white hover:bg-stone-800'}`}>
+                    <button onClick={handleAddToCart} disabled={isStoreClosed || (selectedProduct.stock !== null && selectedProduct.stock <= 0)} className={`flex-1 font-bold h-11 rounded-lg flex justify-between items-center px-4 shadow-md text-sm transition-all active:scale-95 ${isStoreClosed || (selectedProduct.stock !== null && selectedProduct.stock <= 0) ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-stone-900 text-white hover:bg-stone-800'}`}>
                         <span>{isStoreClosed ? 'Fechado' : 'Adicionar'}</span>
                         {!isStoreClosed && <span className="opacity-90">{calculateTotal().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>}
                     </button>

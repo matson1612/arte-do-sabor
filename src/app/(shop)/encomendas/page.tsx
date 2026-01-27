@@ -1,3 +1,4 @@
+// src/app/(shop)/encomendas/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -89,7 +90,7 @@ export default function EncomendasPage() {
 
   const calculateTotal = () => {
     if (!selectedProduct) return 0;
-    let total = 0; // Encomenda começa em 0
+    let total = 0; // Encomendas: Base 0
     Object.values(selectedOptions).flat().forEach(opt => total += getOptionPrice(opt));
     return total * quantity;
   };
@@ -97,7 +98,6 @@ export default function EncomendasPage() {
   const updateOptionQty = (group: ComplementGroup, option: Option, delta: number) => {
     const currentList = selectedOptions[group.id] || [];
     const currentQty = currentList.filter(o => o.id === option.id).length;
-    
     if (delta > 0) {
         if (group.maxSelection && currentList.length >= group.maxSelection) {
              if (group.maxSelection === 1) { setSelectedOptions({ ...selectedOptions, [group.id]: [option] }); return; }
@@ -105,8 +105,7 @@ export default function EncomendasPage() {
         }
         if (option.stock !== null && currentQty >= option.stock) return alert("Estoque limite atingido.");
         setSelectedOptions({ ...selectedOptions, [group.id]: [...currentList, option] });
-    } 
-    else {
+    } else {
         if (currentQty === 0) return;
         const indexToRemove = currentList.findIndex(o => o.id === option.id);
         if (indexToRemove > -1) {
@@ -117,9 +116,7 @@ export default function EncomendasPage() {
     }
   };
 
-  const getQty = (groupId: string, optionId: string) => {
-      return selectedOptions[groupId]?.filter(o => o.id === optionId).length || 0;
-  };
+  const getQty = (groupId: string, optionId: string) => selectedOptions[groupId]?.filter(o => o.id === optionId).length || 0;
 
   const openModal = (product: Product) => { setSelectedProduct(product); setQuantity(1); setObservation(""); setSelectedOptions({}); };
 
@@ -131,17 +128,11 @@ export default function EncomendasPage() {
     
     let customName = selectedProduct.name;
     const allSelectedOpts = Object.values(selectedOptions).flat();
-    
     if (allSelectedOpts.length > 0) { 
-        const groupedNames = allSelectedOpts.reduce((acc, opt) => {
-            acc[opt.name] = (acc[opt.name] || 0) + 1;
-            return acc;
-        }, {} as Record<string, number>);
-        
+        const groupedNames = allSelectedOpts.reduce((acc, opt) => { acc[opt.name] = (acc[opt.name] || 0) + 1; return acc; }, {} as Record<string, number>);
         const optString = Object.entries(groupedNames).map(([name, qtd]) => qtd > 1 ? `${qtd}x ${name}` : name).join(', ');
         customName += ` (+ ${optString})`; 
     }
-    
     if (observation.trim()) customName += ` [Obs: ${observation}]`;
     addToCart({ ...selectedProduct, name: customName, price: calculateTotal() / quantity, selectedOptions: selectedOptions }, quantity);
     setSelectedProduct(null);
@@ -179,40 +170,28 @@ export default function EncomendasPage() {
         ))}
       </div>
 
-      {/* MODAL AJUSTADO (IGUAL AO DELIVERY) */}
+      {/* MODAL CORRIGIDO */}
       {selectedProduct && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
-            <div className="relative bg-white w-full max-w-md max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-                <button onClick={() => setSelectedProduct(null)} className="absolute top-3 right-3 z-20 bg-white/80 backdrop-blur text-stone-800 p-2 rounded-full hover:bg-white shadow-sm transition"><X size={20}/></button>
-                <div className="h-40 bg-stone-100 relative flex-shrink-0">
+            <div className="relative bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" style={{ maxHeight: '80dvh' }}>
+                <button onClick={() => setSelectedProduct(null)} className="absolute top-3 right-3 z-20 bg-white/90 backdrop-blur text-stone-800 p-2 rounded-full hover:bg-white shadow-md transition"><X size={20}/></button>
+                <div className="h-44 bg-stone-100 relative flex-shrink-0">
                     {selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-stone-300"><ImageOff size={40}/></div>}
                 </div>
                 <div className="p-5 overflow-y-auto flex-1 space-y-5">
-                    <div><h2 className="text-xl font-bold text-stone-800 leading-tight">{selectedProduct.name}</h2><p className="text-sm text-stone-500 mt-1">{selectedProduct.description}</p></div>
+                    <div><h2 className="text-xl font-bold text-stone-800 leading-tight">{selectedProduct.name}</h2><p className="text-sm text-stone-500 mt-1 leading-relaxed">{selectedProduct.description}</p></div>
                     {selectedProduct.fullGroups?.map(group => (
                         <div key={group.id} className="space-y-2">
                             <div className="flex justify-between items-center border-b border-gray-100 pb-1"><h3 className="font-bold text-stone-700 text-sm">{group.title}</h3><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${group.required ? 'bg-rose-100 text-rose-700' : 'bg-gray-100 text-gray-500'}`}>{group.required ? 'OBRIGATÓRIO' : 'OPCIONAL'}</span></div>
-                            <div className="space-y-2">{group.options.map(opt => { 
-                                const optQty = getQty(group.id, opt.id);
-                                return (
-                                    <div key={opt.id} className={`flex justify-between items-center p-2 rounded-lg border ${optQty > 0 ? 'border-pink-500 bg-pink-50/30' : 'border-gray-100 bg-white'}`}>
-                                        <div className="flex-1 pr-2"><span className="text-sm font-bold text-stone-700 block">{opt.name}</span>{getOptionPrice(opt) > 0 && <span className="text-xs text-emerald-600 font-bold">+ R$ {getOptionPrice(opt).toFixed(2)}</span>}</div>
-                                        <div className="flex items-center gap-2 bg-white border border-gray-200 rounded px-1 py-0.5 shadow-sm">
-                                            <button onClick={(e) => {e.stopPropagation(); updateOptionQty(group, opt, -1)}} className={`w-6 h-6 flex items-center justify-center rounded hover:bg-gray-100 ${optQty === 0 ? 'text-gray-300' : 'text-red-500'}`} disabled={optQty === 0}><Minus size={14}/></button>
-                                            <span className={`text-sm font-bold w-4 text-center ${optQty > 0 ? 'text-stone-800' : 'text-gray-300'}`}>{optQty}</span>
-                                            <button onClick={(e) => {e.stopPropagation(); updateOptionQty(group, opt, 1)}} className="w-6 h-6 flex items-center justify-center rounded hover:bg-gray-100 text-green-600"><Plus size={14}/></button>
-                                        </div>
-                                    </div>
-                                ) 
-                            })}</div>
+                            <div className="space-y-2">{group.options.map(opt => { const optQty = getQty(group.id, opt.id); return (<div key={opt.id} className={`flex justify-between items-center p-2 rounded-lg border transition-colors ${optQty > 0 ? 'border-pink-500 bg-pink-50/30' : 'border-gray-100 bg-white'}`}><div className="flex-1 pr-2"><span className="text-sm font-bold text-stone-700 block">{opt.name}</span>{getOptionPrice(opt) > 0 && <span className="text-xs text-emerald-600 font-bold">+ R$ {getOptionPrice(opt).toFixed(2)}</span>}</div><div className="flex items-center gap-2 bg-white border border-gray-200 rounded px-1 py-0.5 shadow-sm"><button onClick={(e) => {e.stopPropagation(); updateOptionQty(group, opt, -1)}} className={`w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100 ${optQty === 0 ? 'text-gray-300' : 'text-red-500'}`} disabled={optQty === 0}><Minus size={14}/></button><span className={`text-sm font-bold w-5 text-center ${optQty > 0 ? 'text-stone-800' : 'text-gray-300'}`}>{optQty}</span><button onClick={(e) => {e.stopPropagation(); updateOptionQty(group, opt, 1)}} className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100 text-green-600"><Plus size={14}/></button></div></div>) })}</div>
                         </div>
                     ))}
                     <div><label className="font-bold text-stone-700 text-sm mb-2 flex items-center gap-2"><MessageSquare size={16}/> Observação</label><textarea className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 text-sm focus:ring-2 focus:ring-pink-100 outline-none resize-none" rows={2} placeholder="Ex: Sem cebola..." value={observation} onChange={e => setObservation(e.target.value)}/></div>
                 </div>
                 <div className="p-4 bg-gray-50 border-t border-gray-200 flex items-center gap-3 flex-shrink-0">
-                    <div className="flex items-center bg-white border rounded-lg h-10 px-1 shadow-sm"><button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="w-8 h-full flex items-center justify-center hover:text-pink-600"><Minus size={16}/></button><span className="w-6 text-center font-bold text-sm text-stone-800">{quantity}</span><button onClick={() => setQuantity(q => q + 1)} className="w-8 h-full flex items-center justify-center hover:text-pink-600"><Plus size={16}/></button></div>
-                    <button onClick={handleAddToCart} className="flex-1 bg-stone-900 text-white font-bold h-10 rounded-lg flex justify-between items-center px-4 shadow-md text-sm hover:bg-stone-800"><span>Adicionar</span><span className="opacity-90">{calculateTotal().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></button>
+                    <div className="flex items-center bg-white border rounded-lg h-11 px-1 shadow-sm"><button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="w-9 h-full flex items-center justify-center hover:text-pink-600 transition"><Minus size={18}/></button><span className="w-8 text-center font-bold text-lg text-stone-800">{quantity}</span><button onClick={() => setQuantity(q => q + 1)} className="w-9 h-full flex items-center justify-center hover:text-pink-600 transition"><Plus size={18}/></button></div>
+                    <button onClick={handleAddToCart} disabled={storeSettings?.isOpen === false} className="flex-1 bg-stone-900 text-white font-bold h-11 rounded-lg flex justify-between items-center px-4 shadow-md text-sm transition-all hover:bg-stone-800"><span>Adicionar</span><span className="opacity-90">{calculateTotal().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></button>
                 </div>
             </div>
         </div>
