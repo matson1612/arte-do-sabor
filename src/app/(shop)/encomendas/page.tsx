@@ -174,7 +174,7 @@ export default function EncomendasPage() {
       {selectedProduct && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
-            <div className="relative bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" style={{ maxHeight: '80dvh' }}>
+            <div className="relative bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" style={{ maxHeight: '75dvh' }}>
                 <button onClick={() => setSelectedProduct(null)} className="absolute top-3 right-3 z-20 bg-white/90 backdrop-blur text-stone-800 p-2 rounded-full hover:bg-white shadow-md transition"><X size={20}/></button>
                 <div className="h-44 bg-stone-100 relative flex-shrink-0">
                     {selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-stone-300"><ImageOff size={40}/></div>}

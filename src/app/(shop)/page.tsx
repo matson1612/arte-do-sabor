@@ -199,7 +199,7 @@ export default function ShopHome() {
             <div className="absolute inset-0" onClick={() => setSelectedProduct(null)}></div>
             
             {/* O CARD */}
-            <div className="relative bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" style={{ maxHeight: '80dvh' }}>
+            <div className="relative bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" style={{ maxHeight: '75dvh' }}>
                 
                 {/* Botão Fechar */}
                 <button onClick={() => setSelectedProduct(null)} className="absolute top-3 right-3 z-20 bg-white/90 backdrop-blur text-stone-800 p-2 rounded-full hover:bg-white shadow-md transition"><X size={20}/></button>
