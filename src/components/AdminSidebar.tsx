@@ -14,7 +14,8 @@ import {
   X,
   DollarSign, 
   List,
-  Megaphone // <--- Ícone Novo Importado
+  Megaphone,
+  Tag // <--- Ícone Novo
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 
@@ -34,22 +35,25 @@ export default function AdminSidebar({ isOpen, onClose }: SidebarProps) {
     { name: "Categorias", href: "/admin/categories", icon: List },
     { name: "Clientes", href: "/admin/customers", icon: Users },
     { name: "Fluxo de Caixa", href: "/admin/finance", icon: DollarSign },
-    { name: "Marketing & Push", href: "/admin/marketing", icon: Megaphone }, // <--- NOVO ITEM
+    { name: "Promoções", href: "/admin/promotions", icon: Tag }, // <--- NOVO ITEM
+    { name: "Marketing & Push", href: "/admin/marketing", icon: Megaphone },
     { name: "Loja & Frete", href: "/admin/settings", icon: Settings },
   ];
 
   // Verifica se o link está ativo
-  const isActive = (href: string) => pathname === href || (href !== "/admin" && pathname.startsWith(href));
+  const isActive = (href: string) => {
+      // Ajuste para não marcar "Cardápio" (/admin) quando estiver em sub-rotas como /admin/promotions
+      if (href === "/admin") return pathname === "/admin";
+      return pathname.startsWith(href);
+  };
 
   return (
     <>
-      {/* Overlay Escuro (Só aparece no celular quando aberto) */}
       <div 
         className={`fixed inset-0 bg-black/50 z-40 transition-opacity lg:hidden ${isOpen ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         onClick={onClose}
       />
 
-      {/* Sidebar Principal */}
       <aside 
         className={`
           fixed top-0 left-0 z-50 h-full w-64 bg-slate-900 text-white shadow-xl transition-transform duration-300
@@ -58,7 +62,6 @@ export default function AdminSidebar({ isOpen, onClose }: SidebarProps) {
         `}
       >
         <div className="flex flex-col h-full">
-            {/* Cabeçalho */}
             <div className="p-6 border-b border-slate-800 flex justify-between items-center">
                 <div className="flex items-center gap-2">
                     <Store className="text-pink-500" />
@@ -67,13 +70,11 @@ export default function AdminSidebar({ isOpen, onClose }: SidebarProps) {
                         <p className="text-xs text-slate-400">Arte do Sabor</p>
                     </div>
                 </div>
-                {/* Botão Fechar (Só Mobile) */}
                 <button onClick={onClose} className="lg:hidden text-slate-400 hover:text-white">
                     <X size={24}/>
                 </button>
             </div>
 
-            {/* Navegação */}
             <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
                 {menuItems.map((item) => {
                     const Icon = item.icon;
@@ -83,7 +84,7 @@ export default function AdminSidebar({ isOpen, onClose }: SidebarProps) {
                         <Link 
                             key={item.href} 
                             href={item.href}
-                            onClick={onClose} // Fecha ao clicar no mobile
+                            onClick={onClose}
                             className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium ${
                                 active 
                                 ? "bg-pink-600 text-white shadow-lg shadow-pink-900/20" 
@@ -97,7 +98,6 @@ export default function AdminSidebar({ isOpen, onClose }: SidebarProps) {
                 })}
             </nav>
 
-            {/* Footer */}
             <div className="p-4 border-t border-slate-800">
                 <Link href="/" className="flex items-center gap-3 w-full px-4 py-3 text-slate-400 hover:text-white mb-1 transition">
                     <Store size={20}/> Ir para Loja

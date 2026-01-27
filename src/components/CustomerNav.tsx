@@ -11,7 +11,7 @@ export default function CustomerNav() {
   const tabs = [
     { name: "Delivery", href: "/", icon: ShoppingBag },
     { name: "Encomendas", href: "/encomendas", icon: Gift },
-    { name: "Especiais", href: "/especiais", icon: Star },
+    { name: "Ofertas", href: "/promocoes", icon: Star },
   ];
 
   return (

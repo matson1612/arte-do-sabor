@@ -21,7 +21,7 @@ export default function ClientHeader() {
   const navLinks = [
     { name: "Delivery", href: "/", icon: Home },
     { name: "Encomendas", href: "/encomendas", icon: Gift },
-    { name: "Especiais", href: "/especiais", icon: Star },
+    { name: "Ofertas", href: "/promocoes", icon: Star },
   ];
 
   const userLinks = [

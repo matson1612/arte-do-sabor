@@ -3,24 +3,26 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation"; // <--- Import Router
 import { db } from "@/lib/firebase";
 import { collection, getDocs, doc, updateDoc, deleteDoc, query, orderBy } from "firebase/firestore";
 import { 
   Plus, Pencil, Trash2, Loader2, ImageOff, Box, Layers, X, Save, Search, 
-  ShoppingBag, Gift, Calendar, Star, List 
+  ShoppingBag, Gift, Calendar, Star, List, Tag // <--- Tag Importado
 } from "lucide-react";
 import { Product, ComplementGroup, Option, SalesChannel, Category } from "@/types";
 import { getProducts, deleteProduct, updateProductField } from "@/services/productService";
 import { getAllGroups, deleteGroup, createGroup, updateGroup } from "@/services/complementService";
 
 export default function AdminDashboard() {
+  const router = useRouter(); // <--- Hook Router
   const [activeTab, setActiveTab] = useState<'products' | 'complements'>('products');
   const [productTab, setProductTab] = useState<SalesChannel>('delivery');
   const [loading, setLoading] = useState(true);
   
   const [products, setProducts] = useState<Product[]>([]);
   const [groups, setGroups] = useState<ComplementGroup[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]); // Lista de categorias
+  const [categories, setCategories] = useState<Category[]>([]);
 
   // Estados Modal Complementos
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -68,14 +70,19 @@ export default function AdminDashboard() {
       }
   });
 
-  // Funções de Complementos (Mantidas com correção de Link)
+  // Funções de Complementos
   const openNewGroupModal = () => { setEditingGroup({ title: "", required: false, maxSelection: 1, options: [] }); setIsModalOpen(true); };
   const openEditGroupModal = (group: ComplementGroup) => { setEditingGroup(JSON.parse(JSON.stringify(group))); setIsModalOpen(true); };
   const handleSaveGroup = async (e: React.FormEvent) => { e.preventDefault(); if (!editingGroup.title) return alert("Título?"); try { const payload = { title: editingGroup.title, required: editingGroup.required || false, maxSelection: Number(editingGroup.maxSelection) || 1, options: editingGroup.options || [] }; if (editingGroup.id) { await updateGroup(editingGroup.id, payload); setGroups(prev => prev.map(g => g.id === editingGroup.id ? { ...payload, id: editingGroup.id! } : g)); } else { const newId = await createGroup(payload); setGroups(prev => [...prev, { ...payload, id: newId }]); } setIsModalOpen(false); } catch (error) { alert("Erro"); } };
   const delGroup = async (id: string) => { if (confirm("Excluir?")) { setGroups(prev => prev.filter(g => g.id !== id)); await deleteGroup(id); } };
   const addOptionToGroup = (type: 'simple' | 'product', linkedId?: string) => { const currentOptions = editingGroup.options || []; let newOpt: Option = { id: crypto.randomUUID(), name: "", priceAdd: 0, isAvailable: true, stock: null }; if (type === 'product' && linkedId) { const p = products.find(x => x.id === linkedId); if (p) newOpt = { ...newOpt, name: p.name, priceAdd: p.basePrice, linkedProductId: p.id, stock: null }; } setEditingGroup({ ...editingGroup, options: [...currentOptions, newOpt] }); };
   const removeOptionFromGroup = (idx: number) => { const opts = [...(editingGroup.options || [])]; opts.splice(idx, 1); setEditingGroup({ ...editingGroup, options: opts }); };
-  const updateOption = (idx: number, field: keyof Option, val: any) => { const opts = [...(editingGroup.options || [])]; opts[idx] = { ...opts[idx], [field]: val }; setEditingGroup({ ...editingGroup, options: opts }); };
+  const updateOption = (idx: number, field: keyof Option, val: any) => { const opts = [...(editingGroup.options || [])]; opts.splice(idx, 1); setEditingGroup({ ...editingGroup, options: opts }); };
+
+  // --- NOVA FUNÇÃO: IR PARA PROMOÇÃO ---
+  const handleCreatePromo = (productId: string) => {
+      router.push(`/admin/promotions?product=${productId}`);
+  };
 
   return (
     <div className="space-y-6 pb-20 relative">
@@ -126,7 +133,23 @@ export default function AdminDashboard() {
                                                     </td>
                                                     <td className="p-4 text-center w-24"><button onClick={() => toggleStatus(p)} className={`w-8 h-4 rounded-full relative transition-colors ${p.isAvailable ? 'bg-green-500' : 'bg-gray-300'}`}><div className={`w-3 h-3 bg-white rounded-full absolute top-0.5 shadow-sm transition-all ${p.isAvailable ? 'left-4.5' : 'left-0.5'}`} /></button></td>
                                                     <td className="p-4 w-24">{p.stock === null ? <span className="text-green-600 font-bold text-[10px] bg-green-50 px-2 py-1 rounded">Livre</span> : (<div className="flex items-center border rounded px-1 bg-white"><Box size={10} className="text-gray-400 mr-1"/><input type="number" defaultValue={p.stock} onBlur={e => updateStock(p.id, e.target.value)} className="w-full text-xs outline-none bg-transparent font-medium"/></div>)}</td>
-                                                    <td className="p-4 text-right w-24 space-x-1 flex justify-end"><Link href={`/admin/products/${p.id}`} className="text-blue-600 p-1.5 hover:bg-blue-50 rounded"><Pencil size={16}/></Link><button onClick={() => delProd(p.id)} className="text-red-500 p-1.5 hover:bg-red-50 rounded"><Trash2 size={16}/></button></td>
+                                                    
+                                                    {/* AÇÕES */}
+                                                    <td className="p-4 text-right w-32">
+                                                        <div className="flex justify-end gap-1">
+                                                            {/* BOTÃO PROMOÇÃO */}
+                                                            <button 
+                                                                onClick={() => handleCreatePromo(p.id)} 
+                                                                className="text-pink-500 p-1.5 hover:bg-pink-50 rounded transition" 
+                                                                title="Criar Promoção"
+                                                            >
+                                                                <Tag size={16}/>
+                                                            </button>
+
+                                                            <Link href={`/admin/products/${p.id}`} className="text-blue-600 p-1.5 hover:bg-blue-50 rounded"><Pencil size={16}/></Link>
+                                                            <button onClick={() => delProd(p.id)} className="text-red-500 p-1.5 hover:bg-red-50 rounded"><Trash2 size={16}/></button>
+                                                        </div>
+                                                    </td>
                                                 </tr>
                                             ))}
                                         </tbody>
