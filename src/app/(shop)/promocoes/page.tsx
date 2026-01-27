@@ -70,7 +70,7 @@ export default function PromocoesPage() {
 
   return (
     <div className="pb-24 max-w-6xl mx-auto px-4 pt-6">
-      <h1 className="text-2xl font-bold text-slate-800 mb-6 flex items-center gap-2"><Tag className="text-pink-600"/> Promoções do Dia</h1>
+      
 
       {offers.length === 0 && combos.length === 0 && (
           <div className="text-center py-20 text-gray-400 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
