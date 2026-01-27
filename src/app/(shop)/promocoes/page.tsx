@@ -26,7 +26,7 @@ export default function PromocoesPage() {
 
   const addOfferToCart = (promo: any) => {
       addToCart({
-          id: promo.productId,
+          id: promo.productId, // ID REAL do produto
           name: promo.productName,
           imageUrl: promo.productImage,
           price: promo.newPrice,
@@ -34,17 +34,19 @@ export default function PromocoesPage() {
           description: 'OFERTA ESPECIAL',
           isAvailable: true,
           basePrice: promo.newPrice,
-          stock: 99,
+          stock: 99, // Será validado pelo ID real no carrinho
           salesChannel: 'delivery',
-          // CORREÇÃO: Campos obrigatórios do CartEntry adicionados
           selectedOptions: {}, 
           complementGroupIds: []
       }, 1);
-      alert("Oferta adicionada ao carrinho!");
+      alert("Oferta adicionada!");
   };
 
   const addComboToCart = (promo: any) => {
       const comboDesc = promo.items.map((i: any) => i.name).join(" + ");
+      // Extrai os IDs reais dos produtos do combo
+      const realIds = promo.items.map((i: any) => i.id);
+
       addToCart({
           id: `combo-${promo.id}`,
           name: `Combo: ${promo.title}`,
@@ -54,13 +56,14 @@ export default function PromocoesPage() {
           category: 'combo',
           isAvailable: true,
           basePrice: promo.price,
-          stock: 99,
+          stock: 99, 
           salesChannel: 'delivery',
-          // CORREÇÃO: Campos obrigatórios do CartEntry adicionados
           selectedOptions: {},
-          complementGroupIds: []
+          complementGroupIds: [],
+          // @ts-ignore - Propriedade customizada para controle de estoque
+          comboIds: realIds 
       }, 1);
-      alert("Combo adicionado ao carrinho!");
+      alert("Combo adicionado!");
   };
 
   if (loading) return <div className="p-20 flex justify-center"><Loader2 className="animate-spin text-pink-500" size={32}/></div>;
@@ -70,7 +73,7 @@ export default function PromocoesPage() {
 
   return (
     <div className="pb-24 max-w-6xl mx-auto px-4 pt-6">
-      
+      <h1 className="text-2xl font-bold text-slate-800 mb-6 flex items-center gap-2"><Tag className="text-pink-600"/> Promoções do Dia</h1>
 
       {offers.length === 0 && combos.length === 0 && (
           <div className="text-center py-20 text-gray-400 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
@@ -79,7 +82,7 @@ export default function PromocoesPage() {
           </div>
       )}
 
-      {/* SEÇÃO OFERTAS */}
+      {/* OFERTAS */}
       {offers.length > 0 && (
           <div className="mb-10">
               <h2 className="font-bold text-lg text-slate-700 mb-4 border-b pb-2 flex items-center gap-2"><Tag size={18}/> Ofertas</h2>
@@ -103,7 +106,7 @@ export default function PromocoesPage() {
           </div>
       )}
 
-      {/* SEÇÃO COMBOS */}
+      {/* COMBOS */}
       {combos.length > 0 && (
           <div>
               <h2 className="font-bold text-lg text-slate-700 mb-4 border-b pb-2 flex items-center gap-2"><PackagePlus size={18}/> Combos</h2>

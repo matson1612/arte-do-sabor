@@ -1,11 +1,10 @@
-// src/app/(admin)/admin/promotions/page.tsx
 "use client";
 
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { db } from "@/lib/firebase";
 import { collection, getDocs, addDoc, deleteDoc, doc, serverTimestamp, query, orderBy } from "firebase/firestore";
-import { Loader2, Plus, Trash2, Tag, Truck, PackagePlus, Ticket, X } from "lucide-react";
+import { Loader2, Plus, Trash2, Tag, Truck, PackagePlus, Ticket, X, Percent } from "lucide-react";
 import { Product } from "@/types";
 
 function PromotionsContent() {
@@ -26,11 +25,15 @@ function PromotionsContent() {
   const [couponQty, setCouponQty] = useState("1");
   const [comboName, setComboName] = useState("");
 
+  // NOVOS ESTADOS PARA CUPOM AVANÇADO
+  const [couponType, setCouponType] = useState<'shipping' | 'percent'>('shipping'); // shipping | percent
+  const [shippingLimit, setShippingLimit] = useState(""); // Limite em R$ (ex: 10.00)
+  const [discountPercent, setDiscountPercent] = useState(""); // % (ex: 10)
+
   useEffect(() => {
     loadData();
   }, []);
 
-  // Abre o modal automaticamente se vier um produto na URL
   useEffect(() => {
       if (urlProductId && products.length > 0) {
           setSelectedProducts([urlProductId]);
@@ -55,7 +58,8 @@ function PromotionsContent() {
   const generateCoupons = (qty: number) => {
     const codes = [];
     for (let i = 0; i < qty; i++) {
-        const code = "FRETE-" + Math.random().toString(36).substring(2, 7).toUpperCase();
+        const prefix = couponType === 'shipping' ? 'FRETE' : 'DESC';
+        const code = `${prefix}-` + Math.random().toString(36).substring(2, 7).toUpperCase();
         codes.push(code);
     }
     return codes;
@@ -73,10 +77,25 @@ function PromotionsContent() {
         else if (activeTab === 'coupon') {
             const qty = parseInt(couponQty);
             if (qty < 1) return alert("Mínimo 1 cupom.");
-            payload = { ...payload, codes: generateCoupons(qty), initialQty: qty };
+            
+            payload = {
+                ...payload,
+                codes: generateCoupons(qty),
+                initialQty: qty,
+                couponType: couponType // 'shipping' ou 'percent'
+            };
+
+            if (couponType === 'shipping') {
+                // Se tiver limite, salva. Se estiver vazio, assume 0 (ou infinito na lógica, mas vamos salvar o valor)
+                // Se o usuário quiser "totalmente grátis", ele pode por um valor alto ou deixar vazio e tratamos como null
+                payload.shippingLimit = shippingLimit ? parseFloat(shippingLimit) : null; 
+            } else {
+                if (!discountPercent) return alert("Informe a porcentagem.");
+                payload.discountPercent = parseFloat(discountPercent);
+            }
         } 
         else if (activeTab === 'combo') {
-            if (selectedProducts.length < 2 || !promoPrice || !comboName) return alert("Selecione min. 2 produtos, nome e preço.");
+            if (selectedProducts.length < 2 || !promoPrice || !comboName) return alert("Selecione min. 2 produtos.");
             const comboItems = selectedProducts.map(id => products.find(p => p.id === id)).filter(Boolean);
             payload = { ...payload, title: comboName, items: comboItems, price: parseFloat(promoPrice) };
         }
@@ -89,8 +108,9 @@ function PromotionsContent() {
 
   const closeModal = () => {
       setIsModalOpen(false);
-      setSelectedProducts([]); setPromoPrice(""); setComboName(""); setCouponQty("1");
-      router.replace('/admin/promotions'); // Limpa URL
+      setSelectedProducts([]); setPromoPrice(""); setComboName(""); setCouponQty("1"); 
+      setShippingLimit(""); setDiscountPercent("");
+      router.replace('/admin/promotions');
   };
 
   const handleDelete = async (id: string) => {
@@ -114,9 +134,26 @@ function PromotionsContent() {
             {promotions.map(promo => (
                 <div key={promo.id} className="bg-white p-5 rounded-xl border shadow-sm relative overflow-hidden group hover:shadow-md transition">
                     <button onClick={() => handleDelete(promo.id)} className="absolute top-2 right-2 text-gray-300 hover:text-red-500 bg-white p-1.5 rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition border"><Trash2 size={16}/></button>
-                    {promo.type === 'offer' && (<div><span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-1 rounded uppercase flex items-center gap-1 w-fit mb-2"><Tag size={12}/> Oferta</span><h3 className="font-bold text-slate-800 text-lg">{promo.productName}</h3><p className="text-2xl font-bold text-emerald-600 mt-2">R$ {promo.newPrice?.toFixed(2)}</p></div>)}
-                    {promo.type === 'coupon' && (<div><span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded uppercase flex items-center gap-1 w-fit mb-2"><Truck size={12}/> Frete Grátis</span><p className="text-xs text-gray-500 mb-2 font-bold">Códigos ({promo.codes?.length})</p><div className="bg-slate-50 p-2 rounded border border-slate-200 text-xs font-mono text-slate-600 max-h-32 overflow-y-auto grid grid-cols-2 gap-2">{promo.codes?.map((c: string) => <div key={c} className="bg-white px-1 rounded border text-center">{c}</div>)}{promo.codes?.length === 0 && <span className="text-red-400 col-span-2 text-center">Esgotado</span>}</div></div>)}
-                    {promo.type === 'combo' && (<div><span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-2 py-1 rounded uppercase flex items-center gap-1 w-fit mb-2"><PackagePlus size={12}/> Combo</span><h3 className="font-bold text-slate-800 mb-1 text-lg">{promo.title}</h3><ul className="text-xs text-gray-500 list-disc pl-4 mb-3 space-y-1">{promo.items?.map((i: any) => <li key={i.id}>{i.name}</li>)}</ul><p className="text-xl font-bold text-purple-600">Por: R$ {promo.price?.toFixed(2)}</p></div>)}
+                    
+                    {promo.type === 'offer' && (
+                        <div><span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-1 rounded uppercase flex items-center gap-1 w-fit mb-2"><Tag size={12}/> Oferta</span><h3 className="font-bold text-slate-800 text-lg">{promo.productName}</h3><p className="text-2xl font-bold text-emerald-600 mt-2">R$ {promo.newPrice?.toFixed(2)}</p></div>
+                    )}
+
+                    {promo.type === 'coupon' && (
+                        <div>
+                            <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase flex items-center gap-1 w-fit mb-2 ${promo.couponType === 'percent' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                                {promo.couponType === 'percent' ? <><Percent size={12}/> Desconto {promo.discountPercent}%</> : <><Truck size={12}/> Frete {promo.shippingLimit ? `(Até R$ ${promo.shippingLimit})` : 'Grátis'}</>}
+                            </span>
+                            <p className="text-xs text-gray-500 mb-2 font-bold">Códigos ({promo.codes?.length})</p>
+                            <div className="bg-slate-50 p-2 rounded border border-slate-200 text-xs font-mono text-slate-600 max-h-32 overflow-y-auto grid grid-cols-2 gap-2">
+                                {promo.codes?.map((c: string) => <div key={c} className="bg-white px-1 rounded border text-center">{c}</div>)}
+                            </div>
+                        </div>
+                    )}
+
+                    {promo.type === 'combo' && (
+                        <div><span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-2 py-1 rounded uppercase flex items-center gap-1 w-fit mb-2"><PackagePlus size={12}/> Combo</span><h3 className="font-bold text-slate-800 mb-1 text-lg">{promo.title}</h3><p className="text-xl font-bold text-purple-600">R$ {promo.price?.toFixed(2)}</p></div>
+                    )}
                 </div>
             ))}
         </div>
@@ -140,10 +177,30 @@ function PromotionsContent() {
                         )}
 
                         {activeTab === 'coupon' && (
-                            <div className="text-center py-4 bg-blue-50 rounded-xl border border-blue-100">
-                                <Ticket size={48} className="mx-auto text-blue-300 mb-2"/>
-                                <p className="text-sm text-blue-800 font-bold mb-1">Gerador de Cupons</p>
-                                <div className="flex items-center justify-center gap-2"><label className="text-xs font-bold text-blue-700 uppercase">Qtd:</label><input type="number" className="w-20 text-center p-2 border border-blue-200 rounded-lg outline-none font-bold" value={couponQty} onChange={e => setCouponQty(e.target.value)}/></div>
+                            <div className="space-y-4 bg-blue-50 p-4 rounded-xl border border-blue-100">
+                                <div className="flex gap-2 bg-white p-1 rounded-lg border border-blue-200">
+                                    <button onClick={() => setCouponType('shipping')} className={`flex-1 py-2 text-xs font-bold rounded ${couponType === 'shipping' ? 'bg-blue-600 text-white shadow' : 'text-blue-600'}`}>Frete Grátis</button>
+                                    <button onClick={() => setCouponType('percent')} className={`flex-1 py-2 text-xs font-bold rounded ${couponType === 'percent' ? 'bg-blue-600 text-white shadow' : 'text-blue-600'}`}>Desconto (%)</button>
+                                </div>
+
+                                {couponType === 'shipping' ? (
+                                    <div>
+                                        <label className="text-xs font-bold text-blue-800 uppercase block mb-1">Limite Máximo do Frete (Opcional)</label>
+                                        <input type="number" placeholder="Ex: 10.00 (Deixe vazio para ilimitado)" className="w-full p-2 border rounded-lg outline-none" value={shippingLimit} onChange={e => setShippingLimit(e.target.value)}/>
+                                        <p className="text-[10px] text-blue-600 mt-1">Se o frete for maior que o limite, o cliente paga a diferença.</p>
+                                    </div>
+                                ) : (
+                                    <div>
+                                        <label className="text-xs font-bold text-blue-800 uppercase block mb-1">Porcentagem de Desconto</label>
+                                        <input type="number" placeholder="Ex: 10" className="w-full p-2 border rounded-lg outline-none" value={discountPercent} onChange={e => setDiscountPercent(e.target.value)}/>
+                                        <p className="text-[10px] text-blue-600 mt-1">Aplica sobre o valor dos produtos (Subtotal).</p>
+                                    </div>
+                                )}
+
+                                <div className="flex items-center gap-2 border-t border-blue-200 pt-4">
+                                    <label className="text-xs font-bold text-blue-700 uppercase">Quantidade de Cupons:</label>
+                                    <input type="number" className="w-20 text-center p-2 border border-blue-200 rounded-lg outline-none font-bold bg-white" value={couponQty} onChange={e => setCouponQty(e.target.value)}/>
+                                </div>
                             </div>
                         )}
 
