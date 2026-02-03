@@ -3,23 +3,43 @@
 
 import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
-import { collection, query, where, getDocs, orderBy } from "firebase/firestore";
+import { collection, query, where, getDocs, orderBy, doc, getDoc } from "firebase/firestore"; // <--- Adicionado doc, getDoc
 import { useAuth } from "@/context/AuthContext";
 import { Loader2, FileText, Calendar, ArrowLeft, CheckCircle, AlertCircle, QrCode, Copy, X } from "lucide-react";
 import Link from "next/link";
-import { QRCodeSVG } from "qrcode.react"; // <--- Importante
-import { generatePixCopyPaste } from "@/utils/pix"; // <--- Importante
+import { QRCodeSVG } from "qrcode.react"; 
+import { generatePixCopyPaste } from "@/utils/pix";
+import { StoreSettings } from "@/types"; // <--- Importante para tipagem
 
 export default function MyInvoicesPage() {
   const { user } = useAuth();
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
+  // Estado para configurações da loja (onde está a chave PIX)
+  const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
+
   // Estados do Modal PIX
   const [showPixModal, setShowPixModal] = useState(false);
   const [pixCode, setPixCode] = useState("");
   const [copied, setCopied] = useState(false);
 
+  // 1. Carregar Configurações da Loja (Chave PIX)
+  useEffect(() => {
+      const loadSettings = async () => {
+          try {
+              const snap = await getDoc(doc(db, "store_settings", "config"));
+              if (snap.exists()) {
+                  setStoreSettings(snap.data() as StoreSettings);
+              }
+          } catch (e) {
+              console.error("Erro ao carregar configurações:", e);
+          }
+      };
+      loadSettings();
+  }, []);
+
+  // 2. Carregar Pedidos em Aberto
   useEffect(() => {
     if (!user) return;
     const load = async () => {
@@ -45,7 +65,16 @@ export default function MyInvoicesPage() {
   // Função para abrir o modal e gerar o código
   const handleOpenPix = () => {
       if (openTotal <= 0) return;
-      const code = generatePixCopyPaste(openTotal);
+      
+      // Validação da Chave PIX
+      if (!storeSettings?.pix) {
+          alert("Erro: A chave PIX da loja não foi encontrada. Entre em contato com o suporte.");
+          return;
+      }
+
+      // Gera o código usando a chave carregada do banco
+      const code = generatePixCopyPaste(openTotal, storeSettings.pix);
+      
       setPixCode(code);
       setCopied(false);
       setShowPixModal(true);
