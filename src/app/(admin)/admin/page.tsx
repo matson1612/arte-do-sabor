@@ -115,7 +115,7 @@ export default function AdminDashboard() {
       });
   };
 
-  // --- AQUI ESTAVA O ERRO (CORRIGIDO) ---
+  // --- AQUI ESTAVA O ERRO (CORRIGIDO)2 ---
   const updateOption = (idx: number, field: keyof Option, val: any) => { 
       setEditingGroup(prev => {
           const opts = [...(prev.options || [])];
