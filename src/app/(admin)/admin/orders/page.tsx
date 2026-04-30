@@ -40,34 +40,76 @@ export default function AdminOrdersPage() {
     return () => unsub();
   }, []);
 
+  // --- CORREÇÃO DO ESTOQUE (SEPARANDO READS E WRITES NA TRANSAÇÃO) ---
   const adjustStock = async (order: Order, multiplier: number) => {
-      let items: CartItem[] = []; try { items = JSON.parse(order.items); } catch(e){ return; }
+      let items: any[] = []; 
+      try { items = JSON.parse(order.items); } catch(e){ return; }
+
       await runTransaction(db, async (transaction) => {
+          const productDecrements = new Map<string, number>();
+          const groupOptionDecrements = new Map<string, Map<string, number>>();
+
+          const addProdDec = (id: string, qty: number) => { 
+              const current = productDecrements.get(id) || 0; 
+              productDecrements.set(id, current + qty); 
+          };
+
+          // 1. Mapeamento de todos os itens e quantidades
           for (const item of items) {
-              if (item.id) {
-                  const pRef = doc(db, "products", item.id);
-                  const pSnap = await transaction.get(pRef);
-                  if (pSnap.exists() && pSnap.data().stock !== null) {
-                      transaction.update(pRef, { stock: pSnap.data().stock + (item.quantity * multiplier) });
-                  }
+              if (item.category === 'combo' && item.comboIds) {
+                  item.comboIds.forEach((id: string) => addProdDec(id, item.quantity));
+              } 
+              else if (item.id && item.category !== 'promo') {
+                  addProdDec(item.id, item.quantity);
               }
+
               if (item.selectedOptions) {
-                  for (const [gId, opts] of Object.entries(item.selectedOptions)) {
-                      const gRef = doc(db, "complement_groups", gId);
-                      const gSnap = await transaction.get(gRef);
-                      if (gSnap.exists()) {
-                          const list = gSnap.data().options || [];
-                          let changed = false;
-                          (opts as Option[]).forEach(o => {
-                              const idx = list.findIndex((x:any) => x.id === o.id);
-                              if (idx !== -1 && list[idx].stock !== null) {
-                                  list[idx].stock += (item.quantity * multiplier);
-                                  changed = true;
-                              }
-                          });
-                          if(changed) transaction.update(gRef, { options: list });
+                  for (const [groupId, opts] of Object.entries(item.selectedOptions)) {
+                      for (const opt of (opts as any[])) {
+                          if (opt.linkedProductId) {
+                              addProdDec(opt.linkedProductId, item.quantity);
+                          } else {
+                              if (!groupOptionDecrements.has(groupId)) groupOptionDecrements.set(groupId, new Map());
+                              const grpMap = groupOptionDecrements.get(groupId)!;
+                              grpMap.set(opt.id, (grpMap.get(opt.id) || 0) + item.quantity);
+                          }
                       }
                   }
+              }
+          }
+
+          // 2. FASE DE LEITURA (GET) - OBRIGATÓRIO SER ANTES DOS UPDATES
+          const productSnaps = new Map();
+          for (const prodId of productDecrements.keys()) { 
+              productSnaps.set(prodId, await transaction.get(doc(db, "products", prodId))); 
+          }
+          
+          const groupSnaps = new Map();
+          for (const groupId of groupOptionDecrements.keys()) { 
+              groupSnaps.set(groupId, await transaction.get(doc(db, "complement_groups", groupId))); 
+          }
+
+          // 3. FASE DE ESCRITA (UPDATE)
+          for (const [prodId, qty] of productDecrements.entries()) {
+              const snap = productSnaps.get(prodId);
+              if (snap && snap.exists() && snap.data().stock !== null) {
+                  transaction.update(doc(db, "products", prodId), { stock: snap.data().stock + (qty * multiplier) });
+              }
+          }
+
+          for (const [groupId, optsMap] of groupOptionDecrements.entries()) {
+              const snap = groupSnaps.get(groupId);
+              if (snap && snap.exists()) {
+                  const list = snap.data().options || [];
+                  let changed = false;
+                  optsMap.forEach((qty, optId) => {
+                      const idx = list.findIndex((x:any) => x.id === optId);
+                      if (idx !== -1 && list[idx].stock !== null) {
+                          list[idx].stock += (qty * multiplier);
+                          changed = true;
+                      }
+                  });
+                  if (changed) transaction.update(doc(db, "complement_groups", groupId), { options: list });
               }
           }
       });
@@ -81,14 +123,22 @@ export default function AdminOrdersPage() {
 
         await updateDoc(doc(db, "orders", order.id), { status: newStatus });
         notifyClient(order, newStatus);
-    } catch (e) { alert("Erro ao atualizar."); }
+    } catch (e: any) { 
+        console.error("ERRO AO ATUALIZAR STATUS:", e); // <--- Log de Erro Inserido
+        alert("Erro ao atualizar o pedido. Verifique o console."); 
+    }
   };
 
   // QUITAR BOLETA: Marca isPaid = true. NÃO muda o status de entrega (pode já ter sido entregue).
   const handleQuitarBoleta = async (order: Order) => {
       if(!confirm(`Confirmar pagamento de R$ ${order.total.toFixed(2)}?`)) return;
-      await updateDoc(doc(db, "orders", order.id), { isPaid: true });
-      alert("Pagamento registrado!");
+      try {
+          await updateDoc(doc(db, "orders", order.id), { isPaid: true });
+          alert("Pagamento registrado!");
+      } catch(e) {
+          console.error("ERRO AO QUITAR BOLETA:", e);
+          alert("Erro ao quitar a boleta.");
+      }
   };
 
   const notifyClient = (order: Order, newStatus: string) => {
@@ -108,7 +158,6 @@ export default function AdminOrdersPage() {
   const filteredOrders = orders.filter(order => {
       if (statusFilter !== "todos") {
           if (statusFilter === "boleta_pendente") {
-              // FILTRO CORRIGIDO: Se for conta aberta, não pago e não cancelado
               if (order.paymentMethod !== 'conta_aberta' || order.isPaid === true || order.status === 'cancelado') return false;
           } else if (order.status !== statusFilter) {
               return false;
@@ -126,7 +175,7 @@ export default function AdminOrdersPage() {
   const getStatusStyle = (status: string) => { switch(status) { case 'em_aberto': return 'border-l-yellow-500 bg-yellow-50'; case 'produzindo': return 'border-l-blue-600 bg-blue-50'; case 'entrega': return 'border-l-orange-500 bg-orange-50'; case 'finalizado': return 'border-l-green-600 bg-white opacity-70'; case 'cancelado': return 'border-l-red-600 bg-red-50 opacity-60'; default: return 'border-l-gray-400 bg-white'; } };
   const getStatusLabel = (status: string) => { switch(status) { case 'em_aberto': return 'AGUARDANDO'; case 'produzindo': return 'PRODUZINDO'; case 'entrega': return 'EM ROTA'; case 'finalizado': return 'ENTREGUE'; case 'cancelado': return 'CANCELADO'; default: return status; } };
 
-  // Edição (mantida)
+  // Edição
   const openEditModal = (order: Order) => { setIsEditing(order); try { setEditItems(JSON.parse(order.items)); setEditTotal(order.total); } catch(e) { setEditItems([]); } };
   const saveEdit = async () => { if (!isEditing) return; try { await updateDoc(doc(db, "orders", isEditing.id), { items: JSON.stringify(editItems), total: editTotal }); alert("Atualizado!"); setIsEditing(null); } catch(e) { alert("Erro ao editar"); } };
   const editAddItem = (productId: string) => { const p = products.find(x => x.id === productId); if(p) { const newItem = { id: p.id, name: p.name, price: p.basePrice, quantity: 1, finalPrice: p.basePrice, selectedOptions: {} }; setEditItems([...editItems, newItem]); setEditTotal(t => t + p.basePrice); } };
@@ -164,7 +213,11 @@ export default function AdminOrdersPage() {
                                 </div>
                                 <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${isBoleta ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>{isBoleta ? 'CONTA' : 'VISTA'}</span>
                             </div>
-                            <div className="bg-white/50 p-3 rounded-lg border border-gray-200/50 space-y-1">{items.map((i, idx) => (<div key={idx} className="flex justify-between text-sm text-gray-700"><span className="font-medium">{i.quantity}x {i.name}</span></div>))}</div>
+                            <div className="bg-white/50 p-3 rounded-lg border border-gray-200/50 space-y-1">
+                                {items.map((i, idx) => (
+                                    <div key={idx} className="flex justify-between text-sm text-gray-700"><span className="font-medium">{i.quantity}x {i.name}</span></div>
+                                ))}
+                            </div>
                             <div className="mt-3 flex justify-between items-end"><p className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1">{order.deliveryMethod === 'delivery' ? <><Truck size={14}/> Entrega</> : '🏪 Retirada'}</p><p className="font-bold text-xl text-slate-800">R$ {order.total.toFixed(2)}</p></div>
                         </div>
 
